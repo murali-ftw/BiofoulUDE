@@ -1,0 +1,7 @@
+# Biofouling Heat Exchanger Monitoring & Decision-Support System
+# Scientific Python dependencies for biophysical simulation, thermal-hydraulics, and ML modeling
+
+numpy>=1.22.0
+scipy>=1.9.0
+pandas>=1.4.0
+scikit-learn>=1.1.0
