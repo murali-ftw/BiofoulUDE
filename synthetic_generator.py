@@ -102,8 +102,15 @@ def legacy_cleaning_policy(hour: int, state: FoulingState) -> Optional[str]:
 
 
 def default_cleaning_policy(hour: int, state: FoulingState) -> Optional[str]:
-    """Default cleaning policy (currently the legacy rule)."""
-    return legacy_cleaning_policy(hour, state)
+    """
+    Default cleaning policy.
+    Trigger (unchanged from the legacy rule): every 720 h, or at >= 230 um once 240 h have passed.
+    Type: alternates by cleaning number, not by hour. Cleaning 1 is MECHANICAL, 2 is CHEMICAL,
+    3 is MECHANICAL, and so on (odd-numbered = mechanical, even-numbered = chemical).
+    """
+    if state.time_since_last_clean >= 720.0 or (state.delta_f_m * 1e6 >= 230.0 and state.time_since_last_clean >= 240.0):
+        return MECHANICAL if (state.n_cleanings % 2 == 0) else CHEMICAL
+    return None
 
 
 def no_cleaning_policy(hour: int, state: FoulingState) -> Optional[str]:
