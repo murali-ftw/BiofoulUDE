@@ -53,7 +53,7 @@ T_BIO_MAX_C: float = 45.0   # Thermal inhibition & denaturation threshold (°C)
 
 # Deposition and Shear Detachment Constants (Bott-Pinheiro Model)
 K_DEPOSITION: float = 1.6e-7    # m/h deposition rate constant
-K_REMOVAL: float = 4.2e-6       # m/(Pa·h) shear removal coefficient
+K_REMOVAL: float = 4.2e-6       # 1/(Pa·h) shear removal coefficient (removal rate = K_REMOVAL * tau_w * delta)
 INDUCTION_TIME_HOURS: float = 168.0  # 7-day initial conditioning lag phase
 
 # Ambient Cooling Water Temperature Profile (Temperate Zone River/Lake Intake)

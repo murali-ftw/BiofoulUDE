@@ -77,7 +77,7 @@ or above `T_max`.
 | `WATER_DENSITY_KG_M3`, `WATER_VISCOSITY_PA_S` | 998.0, 1.002e-3 | water properties |
 | `T_BIO_MIN_C`, `T_BIO_OPT_C`, `T_BIO_MAX_C` | 6.0, 28.0, 45.0 °C | Ratkowsky cardinal temperatures |
 | `K_DEPOSITION` | 1.6e-7 m/h | generator's deposition constant |
-| `K_REMOVAL` | 4.2e-6 | generator's shear-removal constant (see limitations) |
+| `K_REMOVAL` | 4.2e-6 1/(Pa·h) | generator's shear-removal constant |
 | `MECHANICAL_CLEANING_EFFICIENCY`, `CHEMICAL_BIOCIDE_EFFICIENCY` | 0.90, 0.95 | fraction removed per cleaning |
 | `CRITICAL_RF_M2K_W` | 3.0e-4 m²K/W | thermal limit (equivalent to delta = 180 µm, U ≈ 1325 W/m²K) |
 | `CRITICAL_DELTA_P_KPA` | 16.0 kPa | hydraulic limit (clean = 7.91 kPa) |
@@ -372,8 +372,6 @@ docs/                      this document and the problem statement
 ### Known limitations
 
 - **Synthetic data only.** No plant validation of any kind.
-- **Units of `K_REMOVAL`.** `config.py` labels it m/(Pa·h), but in `K_REMOVAL * tau_w * delta`
-  the dimensionally consistent unit is 1/(Pa·h). The value is unaffected; only the label is wrong.
 - **Nominal LMTD.** `DESIGN_LMTD_K` = 14 K is a fixed design value. The generator's own stream
   temperatures (process side 48 °C, cooling water 9–27 °C) imply a larger, seasonally varying
   LMTD, which the simulator does not resolve.
@@ -403,5 +401,7 @@ docs/                      this document and the problem statement
   do cross the limits were added (Section 8).
 - **Network inputs.** `g_theta` now also sees `delta/delta_max` and `hours_since_cleaning`
   (Section 3), so it can represent the carrying-capacity and induction effects.
+- **`K_REMOVAL` unit label.** Corrected in `config.py` from m/(Pa·h) to 1/(Pa·h), the
+  dimensionally consistent unit in `K_REMOVAL * tau_w * delta`. The value is unchanged.
 - **One LMTD.** All heat-duty calculations use `fouling_indicators.DESIGN_LMTD_K` = 14 K. The
   unused 12 K default was removed; no dataset changed.

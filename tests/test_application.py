@@ -5,19 +5,13 @@ workspace/biofouling_ai_repaired/tests/test_application.py
 
 Internal Unit Test Suite for Repaired Biofouling AI Engineering Application.
 Covers physical calculations, simulation reproducibility, ML forecasting,
-cleaning optimization, sustainability metrics, and HTTP dashboard endpoints.
+cleaning optimization, and sustainability metrics.
 """
 
-import http.server
-import json
 import os
 from pathlib import Path
-import socket
 import sys
-import threading
-import time
 import unittest
-import urllib.request
 import numpy as np
 import pandas as pd
 

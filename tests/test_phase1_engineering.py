@@ -7,18 +7,12 @@ Phase 1 Engineering Verification Test Suite:
 1. Pressure-drop baseline and continuum scaling consistency (7.91 kPa).
 2. Parasitic pumping power, energy, and carbon emissions non-zero accounting.
 3. Economic cost parameters disambiguation ($3,500/event vs $35/MWh).
-4. Trained ML model persistence, server loading, and inference endpoints.
-5. Model ablation and zero-leakage chronological split integrity.
+4. Model ablation and zero-leakage chronological split integrity.
 """
 
-import json
 from pathlib import Path
 import sys
-import threading
-import time
 import unittest
-import urllib.request
-import urllib.error
 
 # Ensure application root is in sys.path
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -36,7 +30,7 @@ import baseline_model
 
 
 class TestPhase1EngineeringUpgrade(unittest.TestCase):
-    """Test suite validating Phase 1 engineering corrections and ML dashboard integration."""
+    """Test suite validating Phase 1 engineering corrections."""
 
     # -------------------------------------------------------------------------
     # Task 1: Pressure-Drop Reference & Dependent Calculations

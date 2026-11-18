@@ -5,7 +5,7 @@ workspace/biofouling_ai_repaired/tests/test_cleaning_interval_optimizer.py
 
 Focused Unit Test Suite for Predictive Cleaning Interval Optimizer.
 Tests:
-1. Scenario-based candidate interval cost evaluations
+1. Candidate interval cost evaluations (forward re-simulation)
 2. Status-quo threshold crossing calculation
 3. Lowest-cost feasible candidate selection
 4. Infeasible condition detection and emergency intervention reporting
@@ -13,18 +13,11 @@ Tests:
 6. Cleaning recovery dynamics & physical reset
 7. Deterministic reproducibility
 8. Statistical uncertainty bounds
-9. Upgraded dashboard REST API endpoints
 """
 
-import http.server
-import json
 from pathlib import Path
-import socket
 import sys
-import threading
-import time
 import unittest
-import urllib.request
 import numpy as np
 
 # Add application directory to sys.path

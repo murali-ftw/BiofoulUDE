@@ -92,7 +92,7 @@ class ImprovedFoulingModel:
         confidence: float = 0.95,
         method: str = "conformal",
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
+        r"""
         Generate point predictions alongside statistical prediction bounds.
         If method == 'conformal' and model has calibrated conformal_q_hat_, uses
         distribution-free split-conformal prediction interval: [\hat{y} - q_hat, \hat{y} + q_hat].
@@ -111,7 +111,7 @@ class ImprovedFoulingModel:
         return preds, lower, upper
 
     def calibrate_conformal(self, cal_df: pd.DataFrame, alpha: float = 0.05) -> float:
-        """
+        r"""
         Calibrate split-conformal prediction intervals using an independent held-out calibration slice.
         Computes non-conformity absolute residuals s_i = |y_i - \hat{y}_i| on cal_df and derives
         the distribution-free conformal quantile q_hat.

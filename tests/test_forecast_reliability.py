@@ -2,7 +2,7 @@
 tests/test_forecast_reliability.py
 
 Comprehensive test suite verifying ML forecasting reliability, multi-horizon evaluation
-without target leakage, split-conformal calibration validity, and dashboard API metadata.
+without target leakage, and split-conformal calibration validity.
 """
 
 import math
