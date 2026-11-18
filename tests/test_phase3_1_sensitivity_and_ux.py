@@ -17,9 +17,9 @@ import unittest
 APP_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(APP_DIR))
 
-import config
-import fouling_indicators
-import cleaning_optimizer
+from core import config
+from core import fouling_indicators
+from optimizer import cleaning_optimizer
 
 
 class TestPhase31SensitivityAndUX(unittest.TestCase):

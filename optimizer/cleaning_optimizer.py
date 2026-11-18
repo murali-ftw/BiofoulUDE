@@ -21,11 +21,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-import config
-import fouling_indicators
-import sustainability_metrics
-import synthetic_generator
-from synthetic_generator import (
+from core import config
+from core import fouling_indicators
+from optimizer import sustainability_metrics
+from core import synthetic_generator
+from core.synthetic_generator import (
     CHEMICAL,
     MECHANICAL,
     NOMINAL_SCENARIO,

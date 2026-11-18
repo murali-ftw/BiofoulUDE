@@ -13,7 +13,7 @@ import math
 from typing import Tuple, Union
 import numpy as np
 
-import config
+from core import config
 
 
 def compute_thermal_resistance(biofilm_thickness_m: float, k_biofilm: float = config.BIOFILM_THERMAL_CONDUCTIVITY_W_MK) -> float:

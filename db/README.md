@@ -1,6 +1,9 @@
 # db/
 
-All files are **synthetic** output of `synthetic_generator.py`: 8,760 hourly rows (one year) each, same columns. None of it is plant data.
+> The CSV files are **not stored in git** (see `.gitignore`). After cloning, run `python db/generate.py` from the
+> repository root before training, testing or starting the dashboard.
+
+All files are **synthetic** output of `core/synthetic_generator.py`: 8,760 hourly rows (one year) each, same columns. None of it is plant data.
 
 | File | Seed | Cleaning | Scenario | Limits crossed (first hour) |
 |---|---|---|---|---|
@@ -9,7 +12,7 @@ All files are **synthetic** output of `synthetic_generator.py`: 8,760 hourly row
 | `stress_long_interval.csv` | 44 | every 90 days, alternating | nominal | BSI 3533, Rf 3722 (dP peaks at 15.3 kPa, below 16) |
 | `mismatch_stress.csv` | 45 | every 60 days, alternating | `k_dep_drift=0.5`, `scale_rate_m_per_h=5e-9`, bloom `(4300 h, 504 h, x3.0)` | BSI 3871, Rf 3964, dP 4985 |
 
-`mismatch_stress.csv` is the held-out test set for the future UDE, because it contains mechanisms the nominal ODE lacks. Limits are those in `config.py` (Rf 3.0e-4 m²K/W and true dP 16 kPa; BSI 75, computed from measured dP).
+`mismatch_stress.csv` is the held-out test set for the future UDE, because it contains mechanisms the nominal ODE lacks. Limits are those in `core/config.py` (Rf 3.0e-4 m²K/W and true dP 16 kPa; BSI 75, computed from measured dP).
 
 Columns, briefly: time (`timestamp`, `time_hours`, `season`); measured signals (`T_cool_in_meas`, `T_cool_out_meas`, `mass_flow_cool_meas`, `delta_P_meas_kPa`, `U_overall_meas`); true simulator state, for evaluation only (`biofilm_thickness_um`, `Rf_fouling_resistance`, `delta_P_true_kPa`, `T_cool_in_true`, `fluid_velocity_m_s`, `wall_shear_Pa`); derived values (`heat_duty_MW`, `thermal_efficiency_ratio`, `bsi_score`); and the cleaning log (`cleaning_event`, `cleaning_type`).
 

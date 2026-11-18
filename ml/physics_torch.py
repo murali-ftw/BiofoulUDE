@@ -11,7 +11,7 @@ import math
 import ml  # noqa: F401
 import torch
 
-import config
+from core import config
 
 K_BIOFILM = config.BIOFILM_THERMAL_CONDUCTIVITY_W_MK
 U_CLEAN = config.U_CLEAN_DESIGN_W_M2K

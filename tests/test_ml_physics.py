@@ -13,9 +13,9 @@ if str(APP_DIR) not in sys.path:
 import ml  # noqa: F401
 import torch
 
-import config
-import fouling_indicators as fi
-import synthetic_generator as sg
+from core import config
+from core import fouling_indicators as fi
+from core import synthetic_generator as sg
 from ml import physics_torch as pt
 
 DT = torch.float64

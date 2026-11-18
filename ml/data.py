@@ -18,7 +18,7 @@ import pandas as pd
 import ml  # noqa: F401
 import torch
 
-import config
+from core import config
 from ml import physics_torch as pt
 from ml.ude import CLEANING_CODES, NONE, cum_clean_hours_from_log, hours_since_cleaning_from_log
 

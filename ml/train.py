@@ -23,7 +23,7 @@ import ml  # noqa: F401
 import torch
 from torch import nn
 
-import config
+from core import config
 from ml import data as D
 from ml.device import ARTIFACTS_DIR, default_dtype, get_device
 from ml.ude import FoulingUDE

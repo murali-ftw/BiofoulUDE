@@ -8,7 +8,7 @@ const C = { blue: "#56B4E9", sky: "#0072B2", orange: "#E69F00", green: "#009E73"
 const RF_SCALE = 1e4; // Rf shown in 1e-4 m²K/W
 
 const S = { meta: null, dataset: "nominal", origin: 3000, series: {}, fullSeries: {}, charts: {}, cleanings: [],
-            metrics: null, correction: null, loaded: {} };
+            metrics: null, correction: null, loaded: {}, decisions: {}, rfTables: {}, overviewToken: 0 };
 
 // ---------------------------------------------------------------------------- helpers
 const $ = (id) => document.getElementById(id);
@@ -152,7 +152,7 @@ function lineChart(canvas, datasets, { xTitle = "hour", yTitle = "", events = []
 }
 
 // ---------------------------------------------------------------------------- tabs
-const TABS = ["monitor", "forecast", "decision", "models", "correction", "about"];
+const TABS = ["overview", "monitor", "rftable", "forecast", "decision", "costs", "models", "correction", "about"];
 function selectTab(name, focus = false) {
   for (const t of TABS) {
     const on = t === name;
@@ -179,6 +179,9 @@ function setupTabs() {
   });
 }
 function onTabShown(name) {
+  if (name === "overview") renderOverview();
+  if (name === "rftable") renderRfTable();
+  if (name === "costs") renderCostTable();
   if (name === "monitor") renderMonitor();
   if (name === "models" && !S.loaded.models) loadModels();
   if (name === "correction" && !S.loaded.correction) loadCorrection();
@@ -217,8 +220,13 @@ function setupShared() {
   });
   $("dataset-desc").textContent = datasetMeta().description;
   $("origin").addEventListener("input", (e) => setOrigin(e.target.value, { fromSlider: true }));
-  $("origin").addEventListener("change", () => { S.loaded.forecast = S.loaded.decision = false; });
-  $("origin-num").addEventListener("change", (e) => { setOrigin(e.target.value); S.loaded.forecast = S.loaded.decision = false; });
+  const originChanged = () => {
+    S.loaded.forecast = S.loaded.decision = false;
+    const active = TABS.find((t) => !$("panel-" + t).hidden);
+    if (["overview", "rftable", "costs"].includes(active)) onTabShown(active);
+  };
+  $("origin").addEventListener("change", originChanged);
+  $("origin-num").addEventListener("change", (e) => { setOrigin(e.target.value); originChanged(); });
   setOrigin(S.origin);
 }
 
@@ -401,7 +409,7 @@ async function runDecision() {
   btn.disabled = true;
   $("decision-summary").textContent = "Evaluating intervals… (re-simulation; first run for an origin can take ~10 s)";
   try {
-    const d = await api("/api/decision", body);
+    const d = await getDecision(body);
     c.setLoading(false);
     const xs = d.candidates.map((k) => k.interval_days);
     const per = (k, f) => k.cost_breakdown[f] / (k.window_days || 1);
@@ -593,6 +601,283 @@ async function loadCorrection() {
   } catch (e) { toast("Correction: " + e.message); }
 }
 
+// ---------------------------------------------------------------------------- shared helpers for the plain views
+function getDecision(body) {
+  const key = JSON.stringify(body);
+  if (!S.decisions[key]) S.decisions[key] = api("/api/decision", body).catch((e) => { delete S.decisions[key]; throw e; });
+  return S.decisions[key];
+}
+function decisionBody() {
+  return { dataset: S.dataset, origin_hour: S.origin, t_min_days: Number($("tmin").value) || 1,
+           t_max_days: Number($("tmax").value) || 90, epsilon: Number($("eps").value) };
+}
+function getRfTable(id, every) {
+  const key = id + ":" + every;
+  if (!S.rfTables[key]) S.rfTables[key] = api(`/api/rf_table?dataset=${id}&every=${every}`).catch((e) => { delete S.rfTables[key]; throw e; });
+  return S.rfTables[key];
+}
+const STATUS = { "Good": ["good", "✅"], "Watch": ["watch", "👀"], "Act soon": ["soon", "⚠️"], "Over limit": ["over", "⛔"] };
+function statusPill(s) { const [cls, sym] = STATUS[s] || ["watch", "•"]; return el("span", { class: "status " + cls, text: `${sym} ${s}` }); }
+const STATUS_COLOR = { good: C.green, watch: C.yellow, soon: C.orange, over: C.verm };
+const rf4 = (v) => (v === null || v === undefined ? "–" : (v * 1e4).toFixed(3));
+const money = (v) => (v === null || v === undefined ? "–" : "$" + Math.round(v).toLocaleString());
+const num = (v, d = 1) => (v === null || v === undefined ? "–" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
+
+function downloadCsv(filename, header, rows) {
+  const esc = (v) => { const t = v === null || v === undefined ? "" : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const text = [header, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+  const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "text/csv" })), download: filename });
+  document.body.append(a); a.click(); a.remove();
+}
+
+function buildTable(groups, columns, rows, rowClass) {
+  // groups: [[label, span, className]], columns: [{label, unit, cls, cell(row) -> string|Node}]
+  const t = el("table");
+  const thead = el("thead");
+  if (groups) thead.append(el("tr", { class: "group" }, ...groups.map(([lab, span, cls]) => el("th", { colspan: String(span), scope: "colgroup", class: cls || "", text: lab }))));
+  thead.append(el("tr", {}, ...columns.map((c) => { const th = el("th", { scope: "col", class: c.cls || "" }, c.label); if (c.unit) th.append(el("span", { class: "unit", text: c.unit })); if (c.title) th.title = c.title; return th; })));
+  const tb = el("tbody");
+  for (const r of rows) {
+    const tr = el("tr", { class: rowClass ? rowClass(r) : "" });
+    columns.forEach((c, i) => {
+      const v = c.cell(r);
+      const td = el(i === 0 ? "th" : "td", i === 0 ? { scope: "row", class: c.cls || "" } : { class: c.cls || "" });
+      if (v instanceof Node) td.append(v); else td.textContent = v;
+      tr.append(td);
+    });
+    tb.append(tr);
+  }
+  t.append(thead, tb);
+  return t;
+}
+
+// ---------------------------------------------------------------------------- 0 Overview
+async function renderOverview() {
+  const token = ++S.overviewToken;
+  const box = $("overview-cards");
+  const ds = datasetMeta();
+  $("overview-when").textContent = `Showing "today" = day ${hToD(S.origin)} (hour ${S.origin}) of "${ds.label}". Move the slider above to look at another moment.`;
+  box.replaceChildren(el("p", { class: "hint", text: "Working it out…" }));
+  const card = (title, big, ...rest) => el("div", { class: "card" }, el("h3", { text: title }), big, ...rest);
+  try {
+    const t = await getRfTable(S.dataset, 24);
+    if (token !== S.overviewToken) return;
+    const rows = t.rows.filter((r) => r.hour <= S.origin);
+    const r = rows.length ? rows[rows.length - 1] : t.rows[0];
+    const k = t.constants;
+    const [cls] = STATUS[r.status];
+    const pct = Math.max(0, r.pct_of_rf_limit);
+    const meter = el("div", { class: "meter", role: "img", "aria-label": `${pct.toFixed(0)}% of the limit` },
+      el("span", { style: `width:${Math.min(100, pct)}%;background:${STATUS_COLOR[cls]}` }));
+    const lastClean = ds.cleaning_events.filter((e) => e.hour <= S.origin).pop();
+    box.replaceChildren(
+      card("How dirty are the tubes?", el("div", { class: "big" }, statusPill(r.status)),
+        el("p", { text: `The slime layer is at ${pct.toFixed(0)}% of the safety limit (Rf = ${rf4(r.rf)} × 10⁻⁴ m²K/W; limit ${rf4(k.rf_limit)}).` }),
+        meter, el("div", { class: "meter-label" }, el("span", { text: "clean" }), el("span", { text: "limit" })),
+        el("p", { class: "hint", text: lastClean ? `Last cleaned on day ${hToD(lastClean.hour)} (${lastClean.type}).` : "Not cleaned yet in this data." })),
+      card("Slime thickness", el("div", { class: "big", text: `${num(r.thickness_um, 0)} µm` }),
+        el("p", { text: `About ${num(r.thickness_um / 70, 1)} times the thickness of a human hair (≈ 70 µm). That is thin, but slime insulates heat very well.` })),
+      card("Cooling lost", el("div", { class: "big", text: `${num(r.cooling_lost_pct, 1)}%` }),
+        el("p", { text: `The exchanger passes about ${num(r.cooling_lost_pct, 1)}% less heat than when it is clean (measured U ${num(r.u_measured, 0)} vs ${num(k.u_clean, 0)} W/m²K when clean).` })),
+      card("Extra pump effort", el("div", { class: "big", text: `${r.extra_pressure_pct >= 0 ? "+" : ""}${num(r.extra_pressure_pct, 1)}%` }),
+        el("p", { text: `The water loses ${num(r.dp_measured_kpa, 2)} kPa of pressure in the tubes, against ${num(k.dp_clean_kpa, 2)} kPa when clean (limit ${num(k.dp_limit_kpa, 0)} kPa).` })),
+      card("If we don't clean", el("div", { class: "big", id: "ov-ttl", text: "…" }), el("p", { id: "ov-ttl-text", text: "Asking the forecast model…" })),
+      card("Suggested cleaning plan", el("div", { class: "big", id: "ov-plan", text: "…" }), el("p", { id: "ov-plan-text", text: "Comparing 90 cleaning plans (takes a few seconds the first time)…" }),
+        el("p", { class: "hint", text: "Advice only: plant staff and procedures decide." })),
+    );
+  } catch (e) { box.replaceChildren(); toast("Overview: " + e.message); return; }
+
+  api("/api/forecast", { dataset: S.dataset, origin_hour: S.origin, horizon_h: 720, model: "ude", planned_cleanings: [], exog: "climatology" })
+    .then((f) => {
+      if (token !== S.overviewToken) return;
+      const t = f.time_to_limit.rf;
+      if (t && t.median !== null) {
+        const d = (t.median - S.origin) / 24;
+        $("ov-ttl").textContent = d < 1 ? "Within a day" : `About ${Math.round(d)} days`;
+        const lo = t.lo === null ? null : Math.max(0, (t.lo - S.origin) / 24), hi = t.hi === null ? null : (t.hi - S.origin) / 24;
+        $("ov-ttl-text").textContent = `until the slime passes the safety limit, if nobody cleans (likely between ${lo === null ? "?" : Math.round(lo)} and ${hi === null ? "more than 30" : Math.round(hi)} days).`;
+      } else {
+        $("ov-ttl").textContent = "Not within 30 days";
+        $("ov-ttl-text").textContent = "The model does not expect the slime to reach the safety limit in the next 30 days, even without cleaning.";
+      }
+    }).catch((e) => { $("ov-ttl").textContent = "–"; $("ov-ttl-text").textContent = "Forecast unavailable: " + e.message; });
+
+  getDecision(decisionBody()).then((d) => {
+    if (token !== S.overviewToken) return;
+    if (d.recommended_interval_days === null) {
+      $("ov-plan").textContent = "Clean soon";
+      $("ov-plan-text").textContent = "No regular cleaning plan keeps every limit and the chemical permit; clean as soon as practical and review.";
+      return;
+    }
+    const rec = d.candidates.find((c) => c.interval_days === d.recommended_interval_days);
+    const f30 = d.compared.fixed_30;
+    $("ov-plan").textContent = `Every ${d.recommended_interval_days} days`;
+    $("ov-plan-text").textContent = `Estimated ${money(rec.cost_per_day)} per day` +
+      (f30 ? `, compared with ${money(f30.cost_per_day)} per day for cleaning every 30 days${f30.feasible ? "" : " (which would break a limit)"}.` : ".");
+  }).catch((e) => { $("ov-plan").textContent = "–"; $("ov-plan-text").textContent = "Unavailable: " + e.message; });
+}
+
+// ---------------------------------------------------------------------------- Fouling (Rf) table
+let rfRowsShown = [];
+async function renderRfTable() {
+  const every = Number($("rf-every").value);
+  const box = $("rf-table-box");
+  box.replaceChildren(el("p", { class: "hint", text: "Calculating…" }));
+  try {
+    const t = await getRfTable(S.dataset, every);
+    const k = t.constants;
+    $("rf-formula").replaceChildren(
+      el("strong", { text: "How each row is calculated" }),
+      el("ul", {},
+        el("li", {}, "Measured values: the median of the last ", el("strong", { text: `${k.block_hours} hours` }), " of sensor readings (since the last cleaning)."),
+        el("li", {}, el("strong", { text: "Step 1, from U: " }), el("code", { text: `Rf = 1/U − 1/${k.u_clean}` }), " , then ", el("code", { text: `thickness = Rf × ${k.k_biofilm}` }),
+          ` (clean U = ${k.u_clean} W/m²K; slime conducts heat at ${k.k_biofilm} W/m·K).`),
+        el("li", {}, el("strong", { text: "Step 2, from dP: " }), `find the thickness that makes the pipe-flow equations (Darcy-Weisbach with Haaland friction) give the measured dP at the measured flow: ${k.number_of_tubes} tubes, ${k.tube_inner_diameter_m * 1000} mm wide, ${k.tube_length_m} m long; clean dP = ${num(k.dp_clean_kpa, 2)} kPa.`),
+        el("li", {}, el("strong", { text: "Result: " }), el("code", { text: "thickness = average of step 1 and step 2" }), " , ", el("code", { text: `calculated Rf = thickness / ${k.k_biofilm}` }),
+          ` ; % of limit = Rf / ${rf4(k.rf_limit)}×10⁻⁴ ; cooling lost = 1 − U(Rf)/U_clean ; extra pressure = dP / clean dP − 1.`),
+        el("li", { text: `Status: ${t.status_rule}` }),
+        el("li", { text: "True Rf is the simulator's own value, shown only to check the calculation; a real plant would not know it." })));
+    const attention = $("rf-filter").value === "attention";
+    const rows = t.rows.filter((r) => !attention || r.status !== "Good");
+    rfRowsShown = rows;
+    const counts = {};
+    t.rows.forEach((r) => (counts[r.status] = (counts[r.status] || 0) + 1));
+    $("rf-summary").textContent = `${t.rows.length} rows (one every ${every / 24 === 1 ? "day" : every / 24 + " days"}): ` +
+      Object.entries(counts).map(([s, n]) => `${n} ${s}`).join(", ") + (attention ? `. Showing ${rows.length} that need attention.` : ".") +
+      " The highlighted row is \"today\".";
+    const todayRow = t.rows.filter((r) => r.hour <= S.origin).pop();
+    const cols = [
+      { label: "Day", cell: (r) => { const f = document.createDocumentFragment(); f.append(num(r.day, 0)); if (r.cleaned_since_last_row.length) f.append(el("br"), el("span", { class: "hint", text: "🧽 cleaned (" + r.cleaned_since_last_row.map((c) => c.type[0].toUpperCase()).join("+") + ")" })); return f; } },
+      { label: "Date and time", cell: (r) => r.timestamp.slice(0, 16) },
+      { label: "Water temperature", unit: "°C", cell: (r) => num(r.water_temp_c, 1) },
+      { label: "Water flow", unit: "kg/s", cell: (r) => num(r.flow_kg_s, 1) },
+      { label: "Measured U", unit: "W/m²K", cell: (r) => num(r.u_measured, 0) },
+      { label: "Measured dP", unit: "kPa", cell: (r) => num(r.dp_measured_kpa, 2) },
+      { label: "Rf from U", unit: "× 10⁻⁴ m²K/W", cell: (r) => rf4(r.rf_from_u) },
+      { label: "Thickness from U", unit: "µm", cell: (r) => num(r.thickness_from_u_um, 1) },
+      { label: "Thickness from dP", unit: "µm", cell: (r) => num(r.thickness_from_dp_um, 1) },
+      { label: "Average thickness", unit: "µm", cls: "group-result", cell: (r) => num(r.thickness_um, 1) },
+      { label: "Calculated Rf", unit: "× 10⁻⁴ m²K/W", cls: "group-result", cell: (r) => rf4(r.rf) },
+      { label: "% of Rf limit", unit: "%", cls: "group-result", cell: (r) => num(r.pct_of_rf_limit, 0) },
+      { label: "Cooling lost", unit: "%", cls: "group-result", cell: (r) => num(r.cooling_lost_pct, 1) },
+      { label: "Extra pressure", unit: "%", cls: "group-result", cell: (r) => num(r.extra_pressure_pct, 1) },
+      { label: "Status", cls: "group-result", cell: (r) => statusPill(r.status) },
+      { label: "True Rf (check)", unit: "× 10⁻⁴ m²K/W", cls: "group-result", cell: (r) => rf4(r.rf_true) },
+    ];
+    const groups = [["When", 2], ["Measured by sensors", 4], ["Step 1: from U", 2], ["Step 2: from dP", 1], ["Result", 7, "group-result"]];
+    box.replaceChildren(buildTable(groups, cols, rows, (r) => (todayRow && r.hour === todayRow.hour ? "highlight" : "")));
+    const hl = box.querySelector("tr.highlight");
+    if (hl) box.scrollTop = Math.max(0, hl.offsetTop - box.clientHeight / 2);
+  } catch (e) { box.replaceChildren(); toast("Fouling table: " + e.message); }
+}
+
+function downloadRfTable() {
+  const h = ["day", "timestamp", "water_temp_c", "flow_kg_s", "u_measured_w_m2k", "dp_measured_kpa", "rf_from_u_m2k_w", "thickness_from_u_um",
+             "thickness_from_dp_um", "thickness_um", "calculated_rf_m2k_w", "pct_of_rf_limit", "cooling_lost_pct", "extra_pressure_pct", "status", "true_rf_m2k_w", "cleaned"];
+  downloadCsv(`fouling_table_${S.dataset}.csv`, h, rfRowsShown.map((r) => [r.day, r.timestamp, r.water_temp_c, r.flow_kg_s, r.u_measured, r.dp_measured_kpa, r.rf_from_u,
+    r.thickness_from_u_um, r.thickness_from_dp_um, r.thickness_um, r.rf, r.pct_of_rf_limit, r.cooling_lost_pct, r.extra_pressure_pct, r.status, r.rf_true,
+    r.cleaned_since_last_row.map((c) => c.type).join("+")]));
+}
+
+// ---------------------------------------------------------------------------- Cost table
+let costRowsShown = [];
+async function renderCostTable() {
+  const box = $("cost-table-box");
+  box.replaceChildren(el("p", { class: "hint", text: "Simulating 90 cleaning plans… (a few seconds the first time for a new \"today\")" }));
+  const c = S.meta.costs, L = S.meta.limits;
+  $("cost-formula").replaceChildren(
+    el("strong", { text: "The cost formula" }),
+    el("p", {}, el("code", { text: "Total cost = cleaning cost + downtime cost + pumping cost + heat-loss cost" })),
+    el("ul", {},
+      el("li", {}, el("strong", { text: "Cleaning cost" }), ` = mechanical cleanings × $${num(c.mechanical_cleaning_cost, 0)} + chemical cleanings × $${num(c.chemical_cleaning_cost, 0)} (plans alternate mechanical and chemical)`),
+      el("li", {}, el("strong", { text: "Downtime cost" }), ` = number of cleanings × ${num(c.downtime_hours_per_cleaning, 0)} hours × $${num(c.downtime_cost_per_hour, 0)} per hour`),
+      el("li", {}, el("strong", { text: "Pumping cost" }), ` = extra pump energy caused by the slime (kWh) × $${num(c.electricity_cost_per_kwh, 2)} per kWh`),
+      el("li", {}, el("strong", { text: "Heat-loss cost" }), ` = cooling lost because of the slime (MWh) × $${num(c.thermal_penalty_cost_per_mwh, 0)} per MWh`),
+      el("li", {}, el("strong", { text: "Allowed?" }), ` A plan is allowed only if Rf stays below ${rf4(L.rf_crit)}×10⁻⁴ m²K/W, dP below ${num(L.dp_crit_kpa, 0)} kPa, the severity index below ${num(L.bsi_crit, 0)}, ` +
+        `and biocide use stays within the ${num(c.biocide_permit_kg_per_year ?? 250, 0)} kg per year permit (scaled to the simulated period). The risk column (from the AI model) must also be at most ε, which is set on the "When to clean" tab.`)));
+  const params = [
+    ["Mechanical cleaning", money(c.mechanical_cleaning_cost), "per cleaning (sponge balls; removes 90% of the slime)"],
+    ["Chemical cleaning", money(c.chemical_cleaning_cost), "per cleaning (biocide shock; removes 95%)"],
+    ["Downtime per cleaning", `${num(c.downtime_hours_per_cleaning, 0)} h`, "the exchanger is stopped while it is cleaned"],
+    ["Cost of downtime", `${money(c.downtime_cost_per_hour)} per hour`, "lost production and staff time"],
+    ["Electricity price", `$${num(c.electricity_cost_per_kwh, 2)} per kWh`, "for the extra pumping caused by the slime"],
+    ["Value of lost cooling", `${money(c.thermal_penalty_cost_per_mwh)} per MWh`, "penalty for heat the exchanger could not remove"],
+    ["Biocide per chemical cleaning", `${num(c.biocide_kg_per_event, 0)} kg`, "chemical released to the environment"],
+    ["Biocide permit", `${num(c.biocide_permit_kg_per_year ?? 250, 0)} kg per year`, "environmental limit"],
+    ["Rf limit", `${rf4(L.rf_crit)} × 10⁻⁴ m²K/W`, "fouling safety limit"],
+    ["dP limit", `${num(L.dp_crit_kpa, 0)} kPa`, "pressure-drop safety limit"],
+    ["Acceptable risk ε", num(Number($("eps").value), 2), "highest allowed chance (from the AI model) of passing a limit before the first cleaning"],
+  ];
+  $("cost-params-box").replaceChildren(el("table", {}, el("caption", { text: "Parameters used (fixed values from config.py)" }),
+    el("thead", {}, el("tr", {}, ...["Parameter", "Value", "Meaning"].map((h) => el("th", { scope: "col", text: h })))),
+    el("tbody", {}, ...params.map(([a, b, m]) => el("tr", {}, el("th", { scope: "row", text: a }), el("td", { text: b }), el("td", { class: "reason", text: m }))))));
+  try {
+    const d = await getDecision(decisionBody());
+    const rec = d.recommended_interval_days;
+    const allowed = (r) => r.feasible && r.risk_ok !== false;
+    const why = (r) => {
+      if (allowed(r)) return "✅ Yes";
+      const parts = [];
+      if (!r.feasible) parts.push(r.infeasible_reason || "breaks a limit");
+      if (r.risk_ok === false) parts.push(`risk ${num(r.risk_limit_cross, 2)} is above ε = ${num(d.epsilon, 2)}`);
+      return "⛔ No: " + parts.join("; ");
+    };
+    const filter = $("cost-filter").value;
+    let rows = d.candidates.map((r) => ({ ...r, plan: r.interval_days === 1 ? "Every day" : `Every ${r.interval_days} days` }));
+    if (filter === "allowed") rows = rows.filter(allowed);
+    if (filter === "every5") rows = rows.filter((r) => r.interval_days % 5 === 0 || r.interval_days === 1 || r.interval_days === rec);
+    const comp = [["fixed_30", "Fixed: every 30 days"], ["condition_based", "Clean when 80% of a limit is reached"], ["never_clean", "Never clean"]]
+      .filter(([k]) => d.compared[k]).map(([k, lab]) => ({ ...d.compared[k], plan: lab, risk_limit_cross: null, risk_ok: null }));
+    const b = (r, k) => (r.cost_breakdown && r.cost_breakdown[k] !== undefined ? r.cost_breakdown[k] : null);
+    const cols = [
+      { label: "Cleaning plan", cell: (r) => (r.interval_days === rec && !r.plan.startsWith("Fixed") ? `★ ${r.plan} (recommended)` : r.plan) },
+      { label: "Simulated period", unit: "days", cell: (r) => num(r.window_days, 0) },
+      { label: "Cleanings", unit: "mechanical + chemical", cell: (r) => (b(r, "cleanings_mechanical") === null ? "–" : `${b(r, "cleanings_mechanical")} + ${b(r, "cleanings_chemical")}`) },
+      { label: "Cleaning cost", unit: "$", cell: (r) => money(b(r, "cleaning_cost")) },
+      { label: "Hours stopped", unit: "h", cell: (r) => num(b(r, "downtime_hours"), 0) },
+      { label: "Downtime cost", unit: "$", cell: (r) => money(b(r, "downtime_cost")) },
+      { label: "Extra pump energy", unit: "kWh", cell: (r) => num(b(r, "pump_energy_kwh"), 0) },
+      { label: "Pumping cost", unit: "$", cell: (r) => money(b(r, "pumping_energy_cost")) },
+      { label: "Cooling lost", unit: "MWh", cell: (r) => num(b(r, "thermal_shortfall_mwh"), 0) },
+      { label: "Heat-loss cost", unit: "$", cell: (r) => money(b(r, "thermal_penalty_cost")) },
+      { label: "Biocide used / allowed", unit: "kg", cell: (r) => (b(r, "biocide_kg") === null ? "–" : `${num(b(r, "biocide_kg"), 0)} / ${num(b(r, "biocide_limit_kg"), 0)}`) },
+      { label: "Highest Rf", unit: "× 10⁻⁴ m²K/W", cell: (r) => rf4(r.peak_rf) },
+      { label: "Highest dP", unit: "kPa", cell: (r) => num(r.peak_dp_kpa, 2) },
+      { label: "Risk of passing a limit", unit: "AI model, 0-1", cell: (r) => (r.risk_limit_cross === null || r.risk_limit_cross === undefined ? "–" : num(r.risk_limit_cross, 2)) },
+      { label: "Allowed?", cls: "group-result reason", cell: (r) => why(r) },
+      { label: "Total cost", unit: "$ over the period", cls: "group-result", cell: (r) => money(r.total_cost) },
+      { label: "Cost per day", unit: "$ per day", cls: "group-result", cell: (r) => money(r.cost_per_day) },
+    ];
+    const groups = [["Plan", 3], ["Cleaning", 1], ["Downtime", 2], ["Pumping", 2], ["Cooling", 2], ["Chemical & safety", 4], ["Results", 3, "group-result"]];
+    const cls = (r) => (r.interval_days === rec && r.plan.startsWith("Every") ? "recommended" : allowed(r) ? "" : "not-allowed");
+    costRowsShown = [...comp, ...rows];
+    const nAllowed = d.candidates.filter(allowed).length;
+    $("cost-summary").textContent = rec === null
+      ? `None of the ${d.candidates.length} plans is allowed from this "today". Clean as soon as practical and review.`
+      : `${nAllowed} of ${d.candidates.length} plans are allowed. Cheapest allowed: every ${rec} days. The first three rows are reference strategies (simulated over 90 days).`;
+    box.replaceChildren(buildTable(groups, cols, costRowsShown, cls));
+  } catch (e) { box.replaceChildren(); toast("Cost table: " + e.message); }
+}
+
+function downloadCostTable() {
+  const h = ["plan", "simulated_days", "cleanings_mechanical", "cleanings_chemical", "cleaning_cost", "downtime_hours", "downtime_cost", "pump_energy_kwh",
+             "pumping_cost", "cooling_lost_mwh", "heat_loss_cost", "biocide_kg", "biocide_allowed_kg", "peak_rf", "peak_dp_kpa", "risk", "feasible", "reason", "total_cost", "cost_per_day"];
+  downloadCsv(`cost_table_${S.dataset}_h${S.origin}.csv`, h, costRowsShown.map((r) => {
+    const b = r.cost_breakdown || {};
+    return [r.plan, r.window_days, b.cleanings_mechanical, b.cleanings_chemical, b.cleaning_cost, b.downtime_hours, b.downtime_cost, b.pump_energy_kwh,
+            b.pumping_energy_cost, b.thermal_shortfall_mwh, b.thermal_penalty_cost, b.biocide_kg, b.biocide_limit_kg, r.peak_rf, r.peak_dp_kpa,
+            r.risk_limit_cross, r.feasible, r.infeasible_reason, r.total_cost, r.cost_per_day];
+  }));
+}
+
+function setupPlainViews() {
+  $("rf-every").addEventListener("change", renderRfTable);
+  $("rf-filter").addEventListener("change", renderRfTable);
+  $("rf-download").addEventListener("click", downloadRfTable);
+  $("cost-filter").addEventListener("change", renderCostTable);
+  $("cost-download").addEventListener("click", downloadCostTable);
+}
+
 // ---------------------------------------------------------------------------- init
 async function init() {
   setupTabs();
@@ -604,10 +889,10 @@ async function init() {
   const params = new URLSearchParams(location.search);
   if (S.meta.datasets.some((d) => d.id === params.get("dataset"))) S.dataset = params.get("dataset");
   if (params.get("origin")) S.origin = Number(params.get("origin"));
-  setupShared(); setupForecast(); setupDecision();
+  setupShared(); setupForecast(); setupDecision(); setupPlainViews();
   $("dataset").value = S.dataset;
   $("reset-zoom").addEventListener("click", resetZoom);
   const start = location.hash.replace("#", "");
-  selectTab(TABS.includes(start) ? start : "monitor");
+  selectTab(TABS.includes(start) ? start : "overview");
 }
 init();

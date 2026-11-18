@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from preprocessor import FeaturePipeline
+from legacy.preprocessor import FeaturePipeline
 
 
 class BaselineFoulingModel:

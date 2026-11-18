@@ -12,81 +12,151 @@
 <body>
   <header class="site-header">
     <div class="banner" role="note" aria-label="Data provenance">
-      <strong>SYNTHETIC DATA</strong> · academic demonstration · <strong>not for plant use</strong>
+      <strong>PRACTICE DATA (SYNTHETIC)</strong> · made by a computer simulation for a university project · <strong>not for use at a real plant</strong>
       <span id="mode-badge" class="badge badge-mode" hidden></span>
     </div>
     <div class="title-row">
-      <h1>Heat-exchanger biofouling: UDE forecast &amp; cleaning interval</h1>
+      <h1>Keeping a cooling heat exchanger clean: when should we clean it?</h1>
       <p id="disclaimer" class="disclaimer"></p>
     </div>
     <nav class="tabs" role="tablist" aria-label="Sections">
-      <button role="tab" id="tab-monitor" aria-controls="panel-monitor" aria-selected="true">Monitor</button>
+      <button role="tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
+      <button role="tab" id="tab-monitor" aria-controls="panel-monitor" aria-selected="false" tabindex="-1">Live data</button>
+      <button role="tab" id="tab-rftable" aria-controls="panel-rftable" aria-selected="false" tabindex="-1">Fouling table</button>
       <button role="tab" id="tab-forecast" aria-controls="panel-forecast" aria-selected="false" tabindex="-1">Forecast</button>
-      <button role="tab" id="tab-decision" aria-controls="panel-decision" aria-selected="false" tabindex="-1">Decision</button>
-      <button role="tab" id="tab-models" aria-controls="panel-models" aria-selected="false" tabindex="-1">Models</button>
-      <button role="tab" id="tab-correction" aria-controls="panel-correction" aria-selected="false" tabindex="-1">Correction</button>
+      <button role="tab" id="tab-decision" aria-controls="panel-decision" aria-selected="false" tabindex="-1">When to clean</button>
+      <button role="tab" id="tab-costs" aria-controls="panel-costs" aria-selected="false" tabindex="-1">Cost table</button>
+      <button role="tab" id="tab-models" aria-controls="panel-models" aria-selected="false" tabindex="-1">How accurate?</button>
+      <button role="tab" id="tab-correction" aria-controls="panel-correction" aria-selected="false" tabindex="-1">What the AI learned</button>
       <button role="tab" id="tab-about" aria-controls="panel-about" aria-selected="false" tabindex="-1">About</button>
     </nav>
   </header>
 
   <main>
     <!-- shared dataset / origin controls -->
-    <section class="controls shared" aria-label="Dataset and origin">
-      <label>Dataset
+    <section class="controls shared" aria-label="Which data and which moment">
+      <label>Which data?
         <select id="dataset"></select>
       </label>
       <p id="dataset-desc" class="hint"></p>
-      <label class="grow">Origin hour <output id="origin-out" for="origin"></output>
+      <label class="grow">"Today" in the data: <output id="origin-out" for="origin"></output>
         <input type="range" id="origin" min="11" max="8759" step="1" value="3000">
       </label>
-      <label>Origin (h)
+      <label>Hour number
         <input type="number" id="origin-num" min="11" max="8759" step="1" value="3000">
       </label>
     </section>
 
+    <!-- 0 Overview -->
+    <section role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+      <div class="panel-head"><h2>Overview</h2></div>
+      <div class="plain">
+        <h3>What is this?</h3>
+        <p>Power plants cool their equipment with river or sea water that flows through thousands of thin metal tubes.
+          Over time a slimy layer of bacteria (<strong>biofilm</strong>) grows inside the tubes, a bit like limescale in a kettle.
+          This layer makes cooling worse and makes the pumps work harder. Cleaning removes it, but cleaning costs money and
+          means stopping for a few hours. This tool estimates <strong>how dirty the tubes are</strong>, <strong>how fast they are
+          getting dirtier</strong>, and <strong>how often to clean</strong> so that the total cost is lowest while staying safe.</p>
+      </div>
+      <p class="hint" id="overview-when"></p>
+      <div class="cards" id="overview-cards" aria-live="polite"></div>
+      <div class="plain">
+        <h3>How it works, in four steps</h3>
+        <ol class="steps">
+          <li><strong>Measure.</strong> Sensors give the water temperature, the water flow, how well heat passes through the tubes
+            (<em>U</em>) and the pressure the pumps must overcome (<em>dP</em>).</li>
+          <li><strong>Work out the dirt layer.</strong> From U and dP we calculate the thickness of the slime layer and its
+            <em>fouling resistance</em> (<em>Rf</em>). See the <em>Fouling table</em> tab for every step.</li>
+          <li><strong>Look ahead.</strong> A model that mixes physics with a small AI predicts how the layer will grow
+            (<em>Forecast</em> tab).</li>
+          <li><strong>Choose a cleaning plan.</strong> For every possible cleaning interval (1 to 90 days) we add up cleaning cost,
+            downtime, extra pumping and lost cooling, and check the safety limits (<em>When to clean</em> and <em>Cost table</em>).</li>
+        </ol>
+      </div>
+      <div class="plain">
+        <h3>Words used on this page</h3>
+        <dl class="glossary">
+          <dt>Rf (fouling resistance)</dt><dd>How much the slime layer blocks heat. 0 = perfectly clean. The safety limit here is 3.0 × 10⁻⁴ m²K/W.</dd>
+          <dt>U (heat-transfer coefficient)</dt><dd>How well heat passes through the tubes. Clean = 2,200 W/m²K; it drops as slime builds up.</dd>
+          <dt>dP (pressure drop)</dt><dd>How much pressure the water loses going through the tubes. Clean ≈ 7.9 kPa; it rises as slime narrows the tubes. Limit 16 kPa.</dd>
+          <dt>Biofilm thickness</dt><dd>Thickness of the slime layer, in micrometres (µm). 1 µm = one-thousandth of a millimetre.</dd>
+          <dt>Mechanical / chemical cleaning</dt><dd>Mechanical: sponge balls scrub the tubes (removes 90%). Chemical: a biocide shock (removes 95%, uses 15 kg of chemical, which is limited by an environmental permit).</dd>
+          <dt>Forecast band</dt><dd>The shaded area around a prediction: the model expects the real value to fall inside it about 9 times out of 10.</dd>
+          <dt>UDE / ODE</dt><dd>The two models. ODE = physics equations only. UDE = the same physics plus a small AI correction.</dd>
+          <dt>Synthetic</dt><dd>Made by a computer simulation, not measured at a real plant.</dd>
+        </dl>
+      </div>
+    </section>
+
     <!-- 1 Monitor -->
-    <section role="tabpanel" id="panel-monitor" aria-labelledby="tab-monitor">
+    <section role="tabpanel" id="panel-monitor" aria-labelledby="tab-monitor" hidden>
       <div class="panel-head">
-        <h2>Monitor</h2>
-        <p class="hint">Scroll to zoom, drag to pan (time axis is shared). The vertical line marks the origin. Cleanings are marked
+        <h2>Live data</h2>
+        <p class="hint">Scroll to zoom, drag to pan (time axis is shared). The yellow line is "today". Cleanings are marked
           <span class="key">M</span> mechanical and <span class="key">C</span> chemical.</p>
         <button id="reset-zoom" type="button">Reset zoom</button>
       </div>
+      <p class="plain-note"><strong>In plain words:</strong> each chart shows one measurement over the year. Watch the saw-tooth
+        pattern: the slime builds up (Rf and dP go up, U goes down) and then drops back at each cleaning. Dashed red lines are the
+        safety limits.</p>
       <div class="chart-grid" id="monitor-charts"></div>
+    </section>
+
+    <!-- 1b Fouling table -->
+    <section role="tabpanel" id="panel-rftable" aria-labelledby="tab-rftable" hidden>
+      <div class="panel-head"><h2>Fouling table: how Rf is calculated</h2></div>
+      <p class="plain-note"><strong>In plain words:</strong> each row is one moment in the data. We take the sensor readings of the
+        last 12 hours, work out the slime thickness in two independent ways (from U and from dP), average them, and turn the
+        thickness into Rf. The last columns show the result and what it means.</p>
+      <div class="formula" id="rf-formula"></div>
+      <div class="controls">
+        <label>Show one row every
+          <select id="rf-every"><option value="24">day</option><option value="72">3 days</option><option value="168">week</option></select>
+        </label>
+        <label>Show
+          <select id="rf-filter"><option value="all">all rows</option><option value="attention">only rows that need attention</option></select>
+        </label>
+        <button type="button" id="rf-download">Download as CSV</button>
+      </div>
+      <p class="hint" id="rf-summary" aria-live="polite"></p>
+      <div class="table-scroll" id="rf-table-box"></div>
     </section>
 
     <!-- 2 Forecast -->
     <section role="tabpanel" id="panel-forecast" aria-labelledby="tab-forecast" hidden>
       <div class="panel-head"><h2>Forecast</h2></div>
+      <p class="plain-note"><strong>In plain words:</strong> starting from "today", the model predicts the next days. The solid line is
+        its best guess, the shaded band shows how unsure it is, and the white dashed line is what really happened (we know it
+        because the data is simulated). The box below says when the slime is expected to pass the safety limit.</p>
       <form class="controls" id="forecast-form" onsubmit="return false">
-        <label>Horizon <output id="horizon-out" for="horizon"></output>
+        <label>How far ahead <output id="horizon-out" for="horizon"></output>
           <input type="range" id="horizon" min="24" max="720" step="24" value="168">
         </label>
         <label>Model
           <select id="model">
-            <option value="ude">UDE ensemble</option>
-            <option value="ode">Plain ODE</option>
-            <option value="persistence">Persistence</option>
+            <option value="ude">UDE (physics + AI)</option>
+            <option value="ode">ODE (physics only)</option>
+            <option value="persistence">"Nothing changes" (simple guess)</option>
           </select>
         </label>
-        <label>Future inputs
+        <label>Future water temperature
           <select id="exog">
-            <option value="climatology">Climatology (seasonal T, nominal flow)</option>
-            <option value="oracle">Oracle (measured future T, flow)</option>
+            <option value="climatology">Typical for the season</option>
+            <option value="oracle">The real future values (for testing)</option>
           </select>
         </label>
-        <label>Temperature offset <output id="toff-out" for="toff"></output>
+        <label>Make the water warmer/colder by <output id="toff-out" for="toff"></output>
           <input type="range" id="toff" min="-5" max="5" step="0.5" value="0">
         </label>
         <fieldset class="cleanings">
-          <legend>Planned cleanings in the horizon</legend>
+          <legend>Planned cleanings in this period</legend>
           <div class="row">
             <label>Hour <input type="number" id="clean-hour" step="1"></label>
             <label>Type
               <select id="clean-type"><option value="mechanical">mechanical</option><option value="chemical">chemical</option></select>
             </label>
             <button type="button" id="clean-add">Add</button>
-            <button type="button" id="clean-dataset">Use dataset's schedule</button>
+            <button type="button" id="clean-dataset">Use the plant's schedule</button>
             <button type="button" id="clean-clear">Clear</button>
           </div>
           <ul id="clean-list" aria-live="polite"></ul>
@@ -101,16 +171,20 @@
     <!-- 3 Decision -->
     <section role="tabpanel" id="panel-decision" aria-labelledby="tab-decision" hidden>
       <div class="panel-head">
-        <h2>Decision</h2>
-        <p class="advisory" role="note"><strong>Advisory only:</strong> operator review and plant procedures remain mandatory.</p>
+        <h2>When to clean</h2>
+        <p class="advisory" role="note"><strong>Advice only:</strong> plant staff and plant procedures always make the final decision.</p>
       </div>
+      <p class="plain-note"><strong>In plain words:</strong> each bar is one cleaning plan ("clean every T days"). The bar height is the
+        cost per day, split into its parts. Cleaning very often is expensive (blue/pink); cleaning rarely wastes cooling (orange).
+        Hatched areas are not allowed (a safety limit or the chemical permit would be broken). The yellow line marks the cheapest
+        allowed plan. See the <em>Cost table</em> tab for every number.</p>
       <form class="controls" onsubmit="return false">
-        <label>Risk tolerance ε <output id="eps-out" for="eps"></output>
+        <label>Acceptable risk of passing a limit <output id="eps-out" for="eps"></output>
           <input type="range" id="eps" min="0" max="0.5" step="0.01" value="0.05">
         </label>
-        <label>Shortest interval (d) <input type="number" id="tmin" min="1" max="90" value="1"></label>
-        <label>Longest interval (d) <input type="number" id="tmax" min="1" max="90" value="90"></label>
-        <button type="button" id="run-decision" class="primary">Evaluate intervals</button>
+        <label>Shortest interval (days) <input type="number" id="tmin" min="1" max="90" value="1"></label>
+        <label>Longest interval (days) <input type="number" id="tmax" min="1" max="90" value="90"></label>
+        <button type="button" id="run-decision" class="primary">Compare cleaning plans</button>
       </form>
       <div id="decision-summary" class="readout" aria-live="polite"></div>
       <div class="chart-card wide" id="decision-chart-card"></div>
@@ -118,16 +192,39 @@
       <div id="decision-notes" class="notes"></div>
     </section>
 
+    <!-- 3b Cost table -->
+    <section role="tabpanel" id="panel-costs" aria-labelledby="tab-costs" hidden>
+      <div class="panel-head">
+        <h2>Cost table: every cleaning plan, every number</h2>
+        <p class="advisory" role="note"><strong>Advice only:</strong> plant staff and plant procedures always make the final decision.</p>
+      </div>
+      <p class="plain-note"><strong>In plain words:</strong> for each plan ("clean every T days") the simulator runs the exchanger forward
+        from "today" and adds up four costs. A plan is <strong>allowed</strong> only if no safety limit is passed and the chemical stays
+        within the permit. Compare plans by <strong>cost per day</strong>, because longer plans are simulated over longer periods.</p>
+      <div class="formula" id="cost-formula"></div>
+      <div class="table-scroll short" id="cost-params-box"></div>
+      <div class="controls">
+        <label>Show
+          <select id="cost-filter"><option value="all">all intervals (1-90 days)</option><option value="allowed">only allowed plans</option><option value="every5">every 5th day + recommended</option></select>
+        </label>
+        <button type="button" id="cost-download">Download as CSV</button>
+      </div>
+      <p class="hint" id="cost-summary" aria-live="polite"></p>
+      <div class="table-scroll" id="cost-table-box"></div>
+    </section>
+
     <!-- 4 Models -->
     <section role="tabpanel" id="panel-models" aria-labelledby="tab-models" hidden>
-      <div class="panel-head"><h2>Models</h2></div>
+      <div class="panel-head"><h2>How accurate is it?</h2></div>
+      <p class="plain-note"><strong>In plain words:</strong> we tested every model on data it never saw. Lower error is better.
+        "Coverage" says how often reality fell inside the forecast band (it should be about 0.90).</p>
       <div id="verdict" class="verdict"></div>
       <div class="controls">
         <label>Quantity
           <select id="metric-q"><option value="rf">Rf (vs truth)</option><option value="u">U (vs measured)</option><option value="dp">dP (vs measured)</option></select>
         </label>
-        <label>Metric
-          <select id="metric-m"><option value="rmse">RMSE</option><option value="mae">MAE</option><option value="r2">R²</option></select>
+        <label>Score
+          <select id="metric-m"><option value="rmse">RMSE (typical error)</option><option value="mae">MAE (average error)</option><option value="r2">R² (1 = perfect)</option></select>
         </label>
       </div>
       <div class="chart-grid" id="models-charts"></div>
@@ -137,10 +234,12 @@
     <!-- 5 Correction -->
     <section role="tabpanel" id="panel-correction" aria-labelledby="tab-correction" hidden>
       <div class="panel-head">
-        <h2>Learned correction g</h2>
-        <p class="hint">g multiplies the physics deposition rate: g = 1 means the plain physics is kept; g &gt; 1 means the network
-          adds growth, g &lt; 1 removes it. Each panel varies one input with the others held at a reference state.</p>
+        <h2>What the AI learned</h2>
+        <p class="hint">g multiplies the physics growth rate: g = 1 means the plain physics is kept; g &gt; 1 means the AI
+          adds growth, g &lt; 1 removes it. Each panel changes one input and keeps the others fixed.</p>
       </div>
+      <p class="plain-note"><strong>In plain words:</strong> the physics equations are not perfect, so a small AI learns a correction
+        factor g. Here it learned that slime grows faster in summer and slower in winter, which matches how the simulator was built.</p>
       <div id="correction-note" class="readout"></div>
       <div class="chart-grid" id="correction-charts"></div>
     </section>

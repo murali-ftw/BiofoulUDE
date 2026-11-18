@@ -15,8 +15,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-import config
-import fouling_indicators
+from core import config
+from core import fouling_indicators
 
 
 def ratkowsky_growth_factor(T_celsius: float) -> float:

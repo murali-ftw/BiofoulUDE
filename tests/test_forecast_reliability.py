@@ -17,10 +17,10 @@ APP_DIR = Path(__file__).resolve().parent.parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-import config
-import preprocessor
-import improved_model
-import synthetic_generator
+from core import config
+from legacy import preprocessor
+from legacy import improved_model
+from core import synthetic_generator
 
 
 class TestForecastReliability(unittest.TestCase):

@@ -18,14 +18,14 @@ from pathlib import Path
 import sys
 import time
 
-import config
-import synthetic_generator
-import fouling_indicators
-import preprocessor
-import baseline_model
-import improved_model
-import cleaning_optimizer
-import sustainability_metrics
+from core import config
+from core import synthetic_generator
+from core import fouling_indicators
+from legacy import preprocessor
+from legacy import baseline_model
+from legacy import improved_model
+from optimizer import cleaning_optimizer
+from optimizer import sustainability_metrics
 
 
 def run_full_pipeline(seed: int = config.DEFAULT_RANDOM_SEED, hours: int = 8760, save_csv: bool = True) -> dict:

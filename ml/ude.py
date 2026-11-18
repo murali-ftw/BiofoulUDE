@@ -26,7 +26,7 @@ import ml  # noqa: F401
 import torch
 from torch import nn
 
-import config
+from core import config
 from ml import physics_torch as pt
 
 NONE, MECHANICAL, CHEMICAL = 0, 1, 2

@@ -18,8 +18,9 @@ sys.path.insert(0, str(ROOT))
 import numpy as np
 import pandas as pd
 
-import config
-from web.server import DATASET_INFO, DISCLAIMER, MOCK_DIR
+from core import config
+from core import fouling_indicators
+from web.server import DATASET_INFO, DISCLAIMER, MOCK_DIR, STATUS_RULE, rf_status
 
 FILES = {"nominal": "biofouling_synthetic_dataset.csv", "stress_no_clean": "stress_no_clean.csv",
          "stress_long_interval": "stress_long_interval.csv", "mismatch_stress": "mismatch_stress.csv"}
@@ -30,6 +31,31 @@ def events(df):
     ev = df[df["cleaning_event"] == 1]
     return [{"hour": int(h), "type": "mechanical" if t == "Mechanical_Balls" else "chemical"}
             for h, t in zip(ev["time_hours"], ev["cleaning_type"])]
+
+
+def rf_table_mock(df):
+    """Daily Rf calculation rows using the numpy physics (same steps as the real endpoint, simplified)."""
+    k, uc = config.BIOFILM_THERMAL_CONDUCTIVITY_W_MK, config.U_CLEAN_DESIGN_W_M2K
+    dp_clean = fouling_indicators.compute_clean_pressure_drop()
+    rows = []
+    for origin in range(23, len(df), 24):
+        blk = df.iloc[max(0, origin - 11):origin + 1]
+        u, dp, flow = blk["U_overall_meas"].median(), blk["delta_P_meas_kPa"].median(), blk["mass_flow_cool_meas"].median()
+        t_u = max(0.0, (1 / u - 1 / uc) * k)
+        t_p = fouling_indicators.invert_biofilm_thickness_from_dp(dp, flow)
+        rf = (t_u + t_p) / 2 / k
+        pct = 100 * rf / config.CRITICAL_RF_M2K_W
+        rows.append({"hour": origin, "hours_used": len(blk), "water_temp_c": float(blk["T_cool_in_meas"].median()), "flow_kg_s": float(flow),
+                     "u_measured": float(u), "dp_measured_kpa": float(dp), "rf_from_u": t_u / k, "thickness_from_u_um": t_u * 1e6,
+                     "thickness_from_dp_um": t_p * 1e6, "thickness_um": rf * k * 1e6, "rf": rf, "day": (origin + 1) / 24,
+                     "timestamp": str(df["timestamp"].iloc[origin]), "pct_of_rf_limit": pct,
+                     "cooling_lost_pct": 100 * uc * rf / (1 + uc * rf), "extra_pressure_pct": 100 * (dp / dp_clean - 1),
+                     "status": rf_status(pct), "rf_true": float(df["Rf_fouling_resistance"].iloc[origin]), "cleaned_since_last_row": []})
+    return {"every_h": 24, "mock": True, "status_rule": STATUS_RULE,
+            "constants": {"u_clean": uc, "k_biofilm": k, "dp_clean_kpa": dp_clean, "rf_limit": config.CRITICAL_RF_M2K_W,
+                          "dp_limit_kpa": config.CRITICAL_DELTA_P_KPA, "block_hours": 12, "tube_inner_diameter_m": config.TUBE_INNER_DIAMETER_M,
+                          "tube_length_m": config.TUBE_LENGTH_M, "number_of_tubes": config.NUMBER_OF_TUBES},
+            "rows": rows}
 
 
 def write(name, obj):
@@ -48,6 +74,7 @@ def main():
         df = pd.read_csv(ROOT / "db" / fname, keep_default_na=False)
         label, desc = DATASET_INFO[ds_id]
         meta_ds.append({"id": ds_id, "label": label, "hours": len(df), "description": desc, "cleaning_events": events(df)})
+        write(f"rf_table_{ds_id}.json", rf_table_mock(df))
         keep = df[(df["time_hours"] % STRIDE == 0) | (df["cleaning_event"] == 1)]
         write(f"series_{ds_id}.json", {
             "t": keep["time_hours"].astype(int).tolist(), "T_in": keep["T_cool_in_meas"].tolist(),
@@ -89,8 +116,10 @@ def main():
                       "cost_per_day": clean + down + therm + pump,
                       "cost_breakdown": {"cleaning_cost": clean * max(60, d), "downtime_cost": down * max(60, d),
                                          "pumping_energy_cost": pump * max(60, d), "thermal_penalty_cost": therm * max(60, d),
-                                         "cleanings_mechanical": 1, "cleanings_chemical": 1, "biocide_kg": 15.0},
-                      "feasible": d <= 45, "hours_above_limit": 0 if d <= 45 else 24 * (d - 45), "peak_rf": 1e-4 + 4e-6 * d,
+                                         "cleanings_mechanical": 1, "cleanings_chemical": 1, "biocide_kg": 15.0,
+                                         "biocide_limit_kg": 41.1, "downtime_hours": 8.0, "pump_energy_kwh": 0.4 * d * 24,
+                                         "thermal_shortfall_mwh": therm * max(60, d) / 35.0, "co2_kg": 0.18 * d * 24},
+                      "feasible": d <= 45, "infeasible_reason": None if d <= 45 else f"MOCK: passes the fouling (Rf) limit on day 45", "hours_above_limit": 0 if d <= 45 else 24 * (d - 45), "peak_rf": 1e-4 + 4e-6 * d,
                       "peak_dp_kpa": 9 + 0.1 * d, "risk_limit_cross": risk, "risk_ok": risk <= 0.05})
     ok = [c for c in cands if c["feasible"] and c["risk_ok"]]
     comp = lambda cpd, feas: {"window_days": 90, "total_cost": cpd * 90, "cost_per_day": cpd, "cost_breakdown": {}, "feasible": feas,

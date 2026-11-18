@@ -1,7 +1,7 @@
 # ml/: Universal Differential Equation (UDE) fouling model
 
 > **SYNTHETIC DATA, academic demonstration only. Not for plant use.** Every number below comes from the project's
-> own generator (`synthetic_generator.py`). Nothing has been validated against plant telemetry.
+> own generator (`core/synthetic_generator.py`). Nothing has been validated against plant telemetry.
 
 ## What the model is
 
@@ -32,7 +32,7 @@ rem = K_rem · τ_w(v) · δ
     - hours since cleaning, as /720 clipped to [0, 1].
   - **δ/δ_max is the latent state.** In training and forecasting the model rolls it forward itself; it is never
     read from the data.
-- **`K_dep`, `K_rem`:** learnable and log-parameterised, initialised from `config.py`.
+- **`K_dep`, `K_rem`:** learnable and log-parameterised, initialised from `core/config.py`.
 - **Observation model:** δ → Rf = δ/k → U (1/U = 1/U_clean + Rf), and δ → D_eff, roughness → dP. The torch port in
   `physics_torch.py` matches numpy to within 1e-5 relative error.
 - **Check:** with `g` set to the generator's nutrient factor, true inputs and true δ0, the module reproduces the
@@ -105,7 +105,7 @@ kernel-launch overhead dominates. Training therefore ran on CPU in float64.
 
 | | K_dep | K_rem | Validation loss |
 |---|---|---|---|
-| `config.py` (generator) | 1.60e-7 | 4.2e-6 | 1.033 (true physics; noise floor) |
+| `core/config.py` (generator) | 1.60e-7 | 4.2e-6 | 1.033 (true physics; noise floor) |
 | ODE | 1.92e-7 | 3.55e-7 | 1.138 |
 | UDE, 5 seeds | 1.76–1.83e-7 | 3.47–3.70e-7 | 1.018–1.019 |
 
@@ -230,6 +230,6 @@ growth is near zero. It depends only weakly on T, δ and hours since cleaning. S
 - **`K_rem` is unidentifiable from nominal data.** This mainly hurts forecasts near the carrying capacity (the dP limit).
 - **The uncertainty is crude.** Five members times three initial states give 15 trajectories. That is not enough for
   small exceedance probabilities, and it does not include sensor noise or missing mechanisms.
-- **`risk_by_interval`** gives the first-cycle chance constraint only. It is not wired into `cleaning_optimizer.py`.
+- **`risk_by_interval`** gives the first-cycle chance constraint only. It is not wired into `optimizer/cleaning_optimizer.py`.
 - **Planned-cleaning features in the baselines.** Ridge and GBM were given the planned-cleaning timing as features,
   which is known in advance. Persistence ignores planned cleanings by definition.

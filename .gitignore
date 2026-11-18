@@ -1,40 +1,39 @@
-# Byte-compiled / optimized / DLL files
+# ---------------------------------------------------------------------------
+# Data: keep only the generator; regenerate the CSVs with `python db/generate.py`
+# ---------------------------------------------------------------------------
+db/*
+!db/generate.py
+!db/README.md
+
+# External / ad-hoc test data and its results
+test_db/
+
+# ---------------------------------------------------------------------------
+# Generated model files
+# ---------------------------------------------------------------------------
+# Legacy Ridge/GBM checkpoint written by main.py
+models/
+*.pkl
+# ml/artifacts/ (UDE checkpoints, metrics, plots) is small and kept on purpose,
+# so the dashboard works right after cloning.
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
+.eggs/
 
-# Virtual Environments
+# Virtual environments
 .venv/
 venv/
-ENV/
 env/
-
-# IDE and Editor directories
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
+ENV/
 
 # Testing and coverage
 .pytest_cache/
@@ -43,17 +42,18 @@ htmlcov/
 .tox/
 .nox/
 
-# Operating System files
+# ---------------------------------------------------------------------------
+# Editors and operating systems
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Logs and runtime artifacts
+# Logs and scratch files
 *.log
 scratch/
-
-# Antigravity agent discovery folder (local only)
 .agents/
-
-# Model checkpoints (regenerable)
-*.pkl

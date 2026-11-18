@@ -7,7 +7,7 @@ This document describes the modelling pipeline and how far it has been built.
 > evaluation exist in `ml/` (see [ml/README.md](../ml/README.md) for full results). The decision
 > layer exists as a deterministic re-simulation sweep; the UDE first-cycle risk is computed
 > (`ml/forecast.risk_by_interval`) and used by the dashboard, but is not wired into
-> `cleaning_optimizer.py`. Section 9 has the full status table.
+> `optimizer/cleaning_optimizer.py`. Section 9 has the full status table.
 
 All data is synthetic. See [problem_statement.md](problem_statement.md) for scope and limitations.
 
@@ -37,7 +37,7 @@ including its uncertainty, to choose a cleaning interval.
 The model has a single state variable: **biofilm thickness `delta`** (m). Everything the
 instruments see is computed from it.
 
-### Thermal **[EXISTS]** in `fouling_indicators.py`
+### Thermal **[EXISTS]** in `core/fouling_indicators.py`
 
 ```
 Rf = delta / k_biofilm
@@ -62,9 +62,9 @@ tau_w   = (f/8) * rho * v^2                     (wall shear stress)
 A cardinal-temperature function `r(T)` in [0, 1]: zero at or below `T_min`, 1 at `T_opt`, zero at
 or above `T_max`.
 
-### Constants used (from `config.py`)
+### Constants used (from `core/config.py`)
 
-| Name in `config.py` | Value | Meaning |
+| Name in `core/config.py` | Value | Meaning |
 |---|---|---|
 | `U_CLEAN_DESIGN_W_M2K` | 2200.0 W/m²K | clean overall coefficient |
 | `BIOFILM_THERMAL_CONDUCTIVITY_W_MK` | 0.60 W/mK | `k_biofilm` |
@@ -161,11 +161,11 @@ initial values: config.K_DEPOSITION, config.K_REMOVAL
   `delta[t+1] = clamp(delta[t] + dt * f(delta[t], inputs[t]), 0, delta_max)`.
 - **Cleaning events** (known from the log) reset the state:
   `delta <- (1 - efficiency) * delta`, with efficiency 0.90 (mechanical) or 0.95 (chemical) from
-  `config.py`.
+  `core/config.py`.
 
 ## 4. Observation model **[EXISTS]** in `ml/physics_torch.py`
 
-A differentiable PyTorch port of the existing `fouling_indicators.py` functions:
+A differentiable PyTorch port of the existing `core/fouling_indicators.py` functions:
 
 ```
 delta  ->  Rf = delta / k_biofilm  ->  U_hat  = U_clean / (1 + U_clean*Rf)
@@ -205,11 +205,11 @@ The torch port matches the numpy functions to within 1e-5 relative error and pas
 
 ## 6. Decision layer
 
-**[EXISTS]** in `cleaning_optimizer.py`: the shared cost function, forward re-simulation of any
+**[EXISTS]** in `optimizer/cleaning_optimizer.py`: the shared cost function, forward re-simulation of any
 cleaning policy, and the exact 1..90-day sweep, all using the generator's physics.
 **[EXISTS]** outside the optimiser: the UDE first-cycle risk `P(limit crossed before T)`
 (`ml/forecast.risk_by_interval`), applied with epsilon by the dashboard's `/api/decision`.
-**[PROPOSED]**: putting the chance constraint and the UDE forecast inside `cleaning_optimizer.py`.
+**[PROPOSED]**: putting the chance constraint and the UDE forecast inside `optimizer/cleaning_optimizer.py`.
 
 ### Cost per day for cleaning interval T (days)
 
@@ -219,7 +219,7 @@ C(T)  =  -----------------------------------------------------------------------
                                           T
 ```
 
-| Term | Definition | `config.py` value |
+| Term | Definition | `core/config.py` value |
 |---|---|---|
 | `C_clean` | cost per cleaning | `MECHANICAL_CLEANING_COST` = 3500 $ (chemical: 6500 $) |
 | `C_downtime` | `DOWNTIME_HOURS_PER_CLEANING * DOWNTIME_COST_PER_HOUR` | 4 h x 250 $/h = 1000 $ |
@@ -277,8 +277,8 @@ specifications.
 | Baseline | Status | Notes |
 |---|---|---|
 | Persistence (Rf from the last 24 h of U) | [EXISTS] `ml/baselines.py` | Leak-free |
-| Ridge, one per horizon, 24 h history features | [EXISTS] `ml/baselines.py` | Leak-free replacement for `baseline_model.py` |
-| Gradient boosting, one per horizon | [EXISTS] `ml/baselines.py` | Leak-free replacement for `improved_model.py` |
+| Ridge, one per horizon, 24 h history features | [EXISTS] `ml/baselines.py` | Leak-free replacement for `legacy/baseline_model.py` |
+| Gradient boosting, one per horizon | [EXISTS] `ml/baselines.py` | Leak-free replacement for `legacy/improved_model.py` |
 | Plain fitted ODE (g = 1, `K_dep`, `K_rem` fitted) | [EXISTS] `ml/train.py` stage 1 | Shows what the neural correction adds |
 | Physics-guided LSTM | [PROPOSED, optional] | Not built |
 | Fixed 30-day schedule | [EXISTS] | Re-simulated, shared cost function |
@@ -359,24 +359,24 @@ The thermal penalty dominates the cost, so the optimum cleans about twice as oft
 
 | Component | File | Status | Notes |
 |---|---|---|---|
-| Physical constants, thresholds, costs | `config.py` | EXISTS | |
-| Synthetic data generator | `synthetic_generator.py` | EXISTS | One-hour `step()` function, pluggable cleaning policy, optional `GeneratorScenario` (drift, scale, blooms); default cleans every 720 h, alternating mechanical/chemical |
+| Physical constants, thresholds, costs | `core/config.py` | EXISTS | |
+| Synthetic data generator | `core/synthetic_generator.py` | EXISTS | One-hour `step()` function, pluggable cleaning policy, optional `GeneratorScenario` (drift, scale, blooms); default cleans every 720 h, alternating mechanical/chemical |
 | Stress and mismatch datasets | `db/generate.py` | EXISTS | Four files, fixed seeds, byte-reproducible |
-| Thermal and hydraulic physics (numpy) | `fouling_indicators.py` | EXISTS | |
-| Chronological splits, feature pipeline | `preprocessor.py` | EXISTS | Features include same-time `U`, so the target leaks (below) |
-| Ridge baseline | `baseline_model.py` | EXISTS | Predicts same-time `Rf` from same-time `U`; not a forecast |
-| Ridge + GBM hybrid | `improved_model.py` | EXISTS | Same leakage; its multi-step "forecast" holds the last `Rf` constant |
-| Shared cost function | `cleaning_optimizer.cost_breakdown` | EXISTS | `config.py` constants only |
+| Thermal and hydraulic physics (numpy) | `core/fouling_indicators.py` | EXISTS | |
+| Chronological splits, feature pipeline | `legacy/preprocessor.py` | EXISTS | Features include same-time `U`, so the target leaks (below) |
+| Ridge baseline | `legacy/baseline_model.py` | EXISTS | Predicts same-time `Rf` from same-time `U`; not a forecast |
+| Ridge + GBM hybrid | `legacy/improved_model.py` | EXISTS | Same leakage; its multi-step "forecast" holds the last `Rf` constant |
+| Shared cost function | `cleaning_optimizer.cost_breakdown` | EXISTS | `core/config.py` constants only |
 | Policy re-simulation | `cleaning_optimizer.simulate_policy` | EXISTS | Fixed interval, condition-based, never clean, immediate once |
 | Strategy comparison | `CleaningScheduleOptimizer.compare_strategies` | EXISTS | See Section 8 |
 | Interval optimiser (exact 1..90 d sweep) | `CleaningIntervalOptimizer.optimize_interval` | EXISTS | Deterministic, uses generator physics; **does not use any ML forecast** yet |
-| Sustainability accounting | `sustainability_metrics.py` | EXISTS | |
+| Sustainability accounting | `optimizer/sustainability_metrics.py` | EXISTS | |
 | Torch physics and observation model | `ml/physics_torch.py` | EXISTS | numpy parity < 1e-5, gradcheck |
 | UDE (`g_theta`, learnable `K_dep`, `K_rem`) | `ml/ude.py` | EXISTS | Reproduces the generator exactly with g = nutrient factor |
 | Multiple-shooting training, 5-seed ensemble | `ml/train.py`, `ml/artifacts/` | EXISTS | Fitted K_dep 1.76–1.83e-7, K_rem 3.5–3.7e-7 (config 1.6e-7, 4.2e-6) |
 | Leak-free baselines and multi-horizon evaluation | `ml/baselines.py`, `ml/evaluate.py` | EXISTS | `ml/artifacts/metrics.json` |
 | Forecast API, first-cycle risk, g slices | `ml/forecast.py` | EXISTS | Used by the dashboard (`web/`) |
-| Chance constraint inside `cleaning_optimizer.py` | — | PROPOSED | TODO marked in `CleaningIntervalOptimizer`; the dashboard combines both |
+| Chance constraint inside `optimizer/cleaning_optimizer.py` | — | PROPOSED | TODO marked in `CleaningIntervalOptimizer`; the dashboard combines both |
 
 **About the existing ML models.** They use same-time `U_overall_meas` as an input to predict
 same-time `Rf_fouling_resistance`. Because `Rf = 1/U - 1/U_clean`, their R² of about 0.91–0.93
@@ -388,14 +388,14 @@ skill.
 ### Layout
 
 ```
-config.py                  constants, thresholds, costs
-synthetic_generator.py     synthetic dataset generator
-fouling_indicators.py      thermal and hydraulic physics
-preprocessor.py            splits and features
-baseline_model.py          Ridge baseline
-improved_model.py          Ridge + GBM baseline
-cleaning_optimizer.py      cost function, policy re-simulation, strategy comparison, interval sweep
-sustainability_metrics.py  energy, CO2e, biocide accounting
+core/config.py                  constants, thresholds, costs
+core/synthetic_generator.py     synthetic dataset generator
+core/fouling_indicators.py      thermal and hydraulic physics
+legacy/preprocessor.py            splits and features
+legacy/baseline_model.py          Ridge baseline
+legacy/improved_model.py          Ridge + GBM baseline
+optimizer/cleaning_optimizer.py      cost function, policy re-simulation, strategy comparison, interval sweep
+optimizer/sustainability_metrics.py  energy, CO2e, biocide accounting
 main.py                    end-to-end run
 tests/                     unit tests
 db/                        nominal, stress and mismatch datasets, and generate.py
@@ -420,7 +420,7 @@ docs/                      this document and the problem statement
 - **`K_rem` is practically unidentifiable from nominal data.** Both models fit it about 12x
   below config: with cleaning every 30 days, removal is about 2% of deposition. This mainly
   degrades forecasts near the carrying capacity, such as time to the dP limit.
-- **Illustrative costs:** values in `config.py` are not plant data.
+- **Illustrative costs:** values in `core/config.py` are not plant data.
 
 ### Known issues resolved in this iteration
 
@@ -439,7 +439,7 @@ docs/                      this document and the problem statement
   do cross the limits were added (Section 8).
 - **Network inputs.** `g_theta` now also sees `delta/delta_max` and `hours_since_cleaning`
   (Section 3), so it can represent the carrying-capacity and induction effects.
-- **`K_REMOVAL` unit label.** Corrected in `config.py` from m/(Pa·h) to 1/(Pa·h), the
+- **`K_REMOVAL` unit label.** Corrected in `core/config.py` from m/(Pa·h) to 1/(Pa·h), the
   dimensionally consistent unit in `K_REMOVAL * tau_w * delta`. The value is unchanged.
 - **One LMTD.** All heat-duty calculations use `fouling_indicators.DESIGN_LMTD_K` = 14 K. The
   unused 12 K default was removed; no dataset changed.

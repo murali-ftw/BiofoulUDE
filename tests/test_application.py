@@ -20,14 +20,14 @@ APP_DIR = Path(__file__).resolve().parent.parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-import config
-import fouling_indicators
-import synthetic_generator
-import preprocessor
-import baseline_model
-import improved_model
-import cleaning_optimizer
-import sustainability_metrics
+from core import config
+from core import fouling_indicators
+from core import synthetic_generator
+from legacy import preprocessor
+from legacy import baseline_model
+from legacy import improved_model
+from optimizer import cleaning_optimizer
+from optimizer import sustainability_metrics
 
 
 class TestRepairedBiofoulingApplication(unittest.TestCase):

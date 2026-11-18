@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
 
-import config
+from core import config
 
 
 def compute_parasitic_pumping_power_kw(

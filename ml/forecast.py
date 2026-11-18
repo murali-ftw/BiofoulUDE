@@ -23,7 +23,7 @@ import pandas as pd
 import ml  # noqa: F401
 import torch
 
-import config
+from core import config
 from ml import data as D
 from ml import physics_torch as pt
 from ml.ude import CLEANING_CODES, NONE, FoulingUDE, cum_clean_hours_from_log, hours_since_cleaning_from_log
@@ -76,6 +76,32 @@ def state_at_origin(df: pd.DataFrame, origin: int, block_h: int = D.BURN_IN_HOUR
         "delta_se": D.estimate_delta_spread(u, dp, flow) if len(u) > 1 else 5e-6,
         "cum": cum_clean_hours_from_log(hours, origin + 1),
         "hsc": hours_since_cleaning_from_log(hours, origin + 1),
+    }
+
+
+def rf_breakdown(df: pd.DataFrame, origin: int, block_h: int = D.BURN_IN_HOURS) -> Dict[str, float]:
+    """
+    The fouling-resistance calculation used for the model's starting state, step by step, from the
+    last block_h hours <= origin (after the last cleaning). Measured values are block medians.
+      step 1: Rf_U = 1/U - 1/U_clean            -> thickness_U = k_biofilm * Rf_U
+      step 2: thickness_dP from inverting Darcy-Weisbach/Haaland at the measured flow
+      result: thickness = mean of the two (the median of two estimates); Rf = thickness / k_biofilm
+    """
+    hist = df[df["time_hours"] <= origin]
+    last_clean = max([h for h, _ in _log_from(hist, origin)], default=-1)
+    blk = hist[hist["time_hours"] >= max(last_clean, origin - block_h + 1, 0)]
+    u, dp, flow, temp = (blk[c].to_numpy(float) for c in ("U_overall_meas", "delta_P_meas_kPa", "mass_flow_cool_meas", "T_cool_in_meas"))
+    d_u = pt.delta_from_u(torch.tensor(u, dtype=DT)).numpy()
+    d_p = pt.delta_from_dp(torch.tensor(dp, dtype=DT), torch.tensor(flow, dtype=DT)).numpy()
+    thick_u, thick_p = float(np.median(d_u)), float(np.median(d_p))
+    thickness = D.estimate_delta(u, dp, flow)
+    k = config.BIOFILM_THERMAL_CONDUCTIVITY_W_MK
+    return {
+        "hour": int(origin), "hours_used": int(len(u)),
+        "water_temp_c": float(np.median(temp)), "flow_kg_s": float(np.median(flow)),
+        "u_measured": float(np.median(u)), "dp_measured_kpa": float(np.median(dp)),
+        "rf_from_u": thick_u / k, "thickness_from_u_um": thick_u * 1e6, "thickness_from_dp_um": thick_p * 1e6,
+        "thickness_um": thickness * 1e6, "rf": thickness / k,
     }
 
 

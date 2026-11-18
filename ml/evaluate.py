@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 import ml  # noqa: F401
-import config
+from core import config
 from ml import baselines as B
 from ml import data as D
 from ml import forecast as F

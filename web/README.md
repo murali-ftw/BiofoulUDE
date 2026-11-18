@@ -17,8 +17,8 @@ python -m web.server           # REAL mode: db/ datasets, ml/ forecasts, cleanin
 # then open http://127.0.0.1:8050/   (--port to change; always binds to 127.0.0.1)
 ```
 
-Deep links: `http://127.0.0.1:8050/?dataset=stress_no_clean&origin=3200#forecast` (tabs: `#monitor`, `#forecast`,
-`#decision`, `#models`, `#correction`, `#about`).
+Deep links: `http://127.0.0.1:8050/?dataset=stress_no_clean&origin=3200#forecast` (tabs: `#overview`, `#monitor`,
+`#rftable`, `#forecast`, `#decision`, `#costs`, `#models`, `#correction`, `#about`).
 
 Verified: every tab was rendered in headless Chrome against the real server (and Forecast/Decision against the mock
 server) and the screenshots were inspected; the API is covered by `tests/test_web_contract.py`. Not verified: touch
@@ -38,6 +38,7 @@ results are cached per (dataset, origin, model).
 | `POST /api/decision` | cost per day for T = t_min..t_max d (re-simulation), UDE first-cycle risk, recommendation, comparisons |
 | `GET /api/metrics` | `ml/artifacts/metrics.json` |
 | `GET /api/correction` | partial-dependence slices of the learned g |
+| `GET /api/rf_table?dataset&every` | step-by-step Rf calculation rows (every 6-168 h), constants, status rule |
 
 Errors return `{"error": "..."}` with a 4xx/5xx status. Inputs are validated (types, ranges, at most 50 planned cleanings,
 64 KB bodies), and static files are served only from `web/static/` (no path traversal). Contract tests: `tests/test_web_contract.py`
@@ -45,7 +46,30 @@ Errors return `{"error": "..."}` with a 4xx/5xx status. Inputs are validated (ty
 
 ## Tabs
 
-1. **Monitor**: dataset selector; Rf (true, labelled evaluation-only), U, dP, inlet T and flow over the year. Cleanings are marked
+The dashboard is written for non-specialists: tabs have plain names, every tab has an "In plain words" note, statuses use
+words and symbols (✅ Good / 👀 Watch / ⚠️ Act soon / ⛔ Over limit), and the Overview has a glossary.
+
+0. **Overview**: what the tool is for, and status cards for "today":
+   - how dirty the tubes are (% of the Rf limit, with a meter);
+   - slime thickness, compared with a human hair;
+   - cooling lost and extra pump effort;
+   - days until the limit if nobody cleans (UDE forecast);
+   - the suggested cleaning interval and its cost per day against cleaning every 30 days.
+1. **Fouling table** (`GET /api/rf_table?dataset&every`): one row per day, 3 days or week.
+   - **Columns:** the measured inputs (water temperature, flow, U, dP; medians of the last 12 h), then step 1 (Rf and
+     thickness from U) and step 2 (thickness from dP).
+   - **Result columns:** average thickness, **calculated Rf**, % of limit, cooling lost, extra pressure, status, and the
+     simulator's true Rf as a check.
+   - **Also:** the formula and fixed values above the table, a "needs attention" filter and CSV download.
+2. **Cost table**: one row per cleaning interval (1–90 days) plus fixed-30, condition-based and never-clean.
+   - **Columns:** cleanings (mechanical + chemical), cleaning cost, hours stopped, downtime cost, extra pump energy, pumping
+     cost, cooling lost, heat-loss cost, biocide used/allowed, highest Rf and dP, AI risk, **Allowed?** with the reason,
+     **total cost** and **cost per day**.
+   - **Also:** the formula and a parameter table above it, filters and CSV download.
+
+Technical tabs:
+
+1. **Monitor** ("Live data"): dataset selector; Rf (true, labelled evaluation-only), U, dP, inlet T and flow over the year. Cleanings are marked
    `M` / `C`, limits are dashed lines, and the origin is a yellow line. Wheel zooms, drag pans, the time axis is shared across
    charts, and *Reset zoom* undoes it.
 2. **Forecast**: origin (slider snaps to whole hours), horizon 24-720 h, model (UDE / ODE / persistence), future inputs

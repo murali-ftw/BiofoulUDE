@@ -19,14 +19,14 @@ APP_DIR = Path(__file__).resolve().parent.parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-import config
-import fouling_indicators
-import sustainability_metrics
-import cleaning_optimizer
-import synthetic_generator
-import preprocessor
-import improved_model
-import baseline_model
+from core import config
+from core import fouling_indicators
+from optimizer import sustainability_metrics
+from optimizer import cleaning_optimizer
+from core import synthetic_generator
+from legacy import preprocessor
+from legacy import improved_model
+from legacy import baseline_model
 
 
 class TestPhase1EngineeringUpgrade(unittest.TestCase):

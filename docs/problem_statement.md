@@ -76,10 +76,10 @@ instruments measure:
 Rf  = delta / k_biofilm       (conduction through a film of thickness delta)
 ```
 
-- `U_clean`: overall coefficient of the clean exchanger (2200 W/m²K in `config.py`)
+- `U_clean`: overall coefficient of the clean exchanger (2200 W/m²K in `core/config.py`)
 - `Rf`: fouling resistance (m²K/W)
 - `delta`: biofilm thickness (m)
-- `k_biofilm`: biofilm thermal conductivity (0.60 W/mK in `config.py`)
+- `k_biofilm`: biofilm thermal conductivity (0.60 W/mK in `core/config.py`)
 
 **Consequence:** if `U` is measured, `Rf` follows from it algebraically. This matters for how
 models are evaluated (Section 6).
@@ -148,13 +148,13 @@ Common data-driven approaches have specific weaknesses for this problem:
 - Film thermal conductivity is constant.
 - Growth depends on water temperature through a cardinal-temperature (Ratkowsky-type) function.
 - Removal is proportional to wall shear stress and thickness.
-- Cleaning removes a fixed fraction of the film (90% mechanical, 95% chemical in `config.py`).
+- Cleaning removes a fixed fraction of the film (90% mechanical, 95% chemical in `core/config.py`).
 
 ### Limitations
 
 - **Synthetic data only.** No plant telemetry is used, and no plant has been modelled.
 - Microfouling only; no macrofouling, scale kinetics or corrosion kinetics.
-- Cost parameters in `config.py` are illustrative, not plant data.
+- Cost parameters in `core/config.py` are illustrative, not plant data.
 - **Results are not transferable to a real plant** without calibration against that plant's data
   and review under its procedures.
 
@@ -167,11 +167,11 @@ forecast** (tomorrow equals today). It is evaluated on:
 |---|---|---|
 | Cleaning events per year | count | schedule simulation |
 | Thermal performance: mean and minimum U, heat duty Q | W/m²K, MW | observation model |
-| Excess pumping energy | kWh/yr | `sustainability_metrics.py` |
+| Excess pumping energy | kWh/yr | `optimizer/sustainability_metrics.py` |
 | Downtime | h/yr | events x `DOWNTIME_HOURS_PER_CLEANING` (4 h) |
-| Biocide use vs permit limit | kg/yr vs 250 kg/yr | `sustainability_metrics.py` |
-| CO2e from excess pumping | kg/yr | 0.45 kg CO2/kWh (`config.py`) |
-| Constraint violations | count, hours | Rf, dP and BSI limits in `config.py` |
+| Biocide use vs permit limit | kg/yr vs 250 kg/yr | `optimizer/sustainability_metrics.py` |
+| CO2e from excess pumping | kg/yr | 0.45 kg CO2/kWh (`core/config.py`) |
+| Constraint violations | count, hours | Rf, dP and BSI limits in `core/config.py` |
 | Forecast error at 1, 24, 72 and 168 h | MAE, RMSE, R² | leak-free evaluation (model.md, Section 8) |
 
 The project counts as successful if the proposed schedule has **lower total cost than fixed 30-day

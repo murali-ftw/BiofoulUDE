@@ -1,7 +1,7 @@
 # Results 1: UDE ensemble vs plain ODE
 
 > **Synthetic data only; academic demonstration, not for plant use.** All numbers come from the project's own
-> generator (`synthetic_generator.py`). Nothing here has been validated against plant telemetry.
+> generator (`core/synthetic_generator.py`). Nothing here has been validated against plant telemetry.
 
 Generated from `ml/artifacts/metrics.json` and `ml/artifacts/training_log.json` (produced by `python -m ml.train --float64`
 and `python -m ml.evaluate`). Regenerate those files and this report changes accordingly.
@@ -25,7 +25,7 @@ better. True physics with the same estimated initial states scores 1.033, which 
 
 | Model | K_dep | K_rem | Validation loss |
 |---|---|---|---|
-| `config.py` (generator) | 1.600e-07 | 4.200e-06 | 1.033 (true physics) |
+| `core/config.py` (generator) | 1.600e-07 | 4.200e-06 | 1.033 (true physics) |
 | Plain ODE | 1.918e-07 | 3.555e-07 | 1.1380 |
 | UDE seed 11 | 1.761e-07 | 3.704e-07 | 1.0175 |
 | UDE seed 12 | 1.796e-07 | 3.617e-07 | 1.0179 |

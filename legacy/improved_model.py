@@ -16,7 +16,7 @@ from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from preprocessor import FeaturePipeline
+from legacy.preprocessor import FeaturePipeline
 
 
 class ImprovedFoulingModel:
@@ -174,8 +174,8 @@ class ImprovedFoulingModel:
         if not self.is_fitted:
             raise RuntimeError("Model must be fitted before multi-horizon forecasting.")
         import math
-        import config
-        import fouling_indicators
+        from core import config
+        from core import fouling_indicators
 
         last_row = history_df.iloc[-1]
         t0 = int(last_row["time_hours"])

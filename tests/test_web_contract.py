@@ -127,6 +127,36 @@ class ContractMixin:
             self.assertIn(k, d["compared"])
         self.assertIsInstance(d["notes"], list)
 
+    def test_rf_table(self):
+        status, t = _json(self.base, "/api/rf_table?dataset=nominal&every=72")
+        self.assertEqual(status, 200, t)
+        for k in ("u_clean", "k_biofilm", "dp_clean_kpa", "rf_limit", "dp_limit_kpa"):
+            self.assertIsInstance(t["constants"][k], NUM)
+        self.assertIsInstance(t["status_rule"], str)
+        self.assertGreater(len(t["rows"]), 50)
+        num_keys = ("hour", "water_temp_c", "flow_kg_s", "u_measured", "dp_measured_kpa", "rf_from_u", "thickness_from_u_um",
+                    "thickness_from_dp_um", "thickness_um", "rf", "pct_of_rf_limit", "cooling_lost_pct", "extra_pressure_pct", "rf_true")
+        for r in t["rows"]:
+            for k in num_keys:
+                self.assertIsInstance(r[k], NUM, k)
+            self.assertIn(r["status"], ("Good", "Watch", "Act soon", "Over limit"))
+            self.assertAlmostEqual(r["rf"], r["thickness_um"] * 1e-6 / t["constants"]["k_biofilm"], delta=1e-9)
+            self.assertIsInstance(r["cleaned_since_last_row"], list)
+        status, _ = _json(self.base, "/api/rf_table?dataset=nominal&every=2")
+        self.assertEqual(status, 400)
+
+    def test_decision_cost_table_fields(self):
+        status, d = _json(self.base, "/api/decision", {"dataset": "nominal", "origin_hour": 3000})
+        self.assertEqual(status, 200, d)
+        for c in d["candidates"]:
+            b = c["cost_breakdown"]
+            for k in ("cleaning_cost", "downtime_cost", "pumping_energy_cost", "thermal_penalty_cost", "downtime_hours",
+                      "pump_energy_kwh", "thermal_shortfall_mwh", "biocide_kg", "biocide_limit_kg", "cleanings_mechanical", "cleanings_chemical"):
+                self.assertIsInstance(b[k], NUM, k)
+            self.assertIn("infeasible_reason", c)
+            if not c["feasible"]:
+                self.assertIsInstance(c["infeasible_reason"], str)
+
     def test_metrics_and_correction(self):
         status, m = _json(self.base, "/api/metrics")
         self.assertEqual(status, 200, m)

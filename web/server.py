@@ -101,6 +101,20 @@ def _cleanings(value, origin, horizon):
     return sorted(out, key=lambda e: e["hour"])
 
 
+def rf_status(pct_of_limit: float) -> str:
+    """Plain-language status from Rf as a percentage of its limit."""
+    if pct_of_limit > 100.0:
+        return "Over limit"
+    if pct_of_limit >= 90.0:
+        return "Act soon"
+    if pct_of_limit >= 60.0:
+        return "Watch"
+    return "Good"
+
+
+STATUS_RULE = "Good below 60% of the Rf limit, Watch 60-90%, Act soon 90-100%, Over limit above 100%."
+
+
 def _clean_json(x):
     """Replace NaN/inf with None so the output is strict JSON."""
     if isinstance(x, float):
@@ -161,6 +175,13 @@ class MockBackend:
         _int(body.get("origin_hour"), "origin_hour", 11, ds["hours"] - 1)
         return self._load("decision.json")
 
+    def rf_table(self, q):
+        ds = self._dataset(q.get("dataset"))
+        every = _int(q.get("every", 24), "every", 6, 168)
+        t = self._load(f"rf_table_{ds['id']}.json")
+        rows = [r for r in t["rows"] if (r["hour"] + 1) % every == 0] or t["rows"]
+        return dict(t, rows=rows, every_h=every)
+
     def metrics(self):
         return self._load("metrics.json")
 
@@ -173,8 +194,8 @@ class RealBackend:
 
     def __init__(self):
         import ml  # noqa: F401  (MPS fallback env before torch)
-        import config
-        import cleaning_optimizer as co
+        from core import config
+        from optimizer import cleaning_optimizer as co
         from ml import data as D
         from ml import forecast as F
         sys.path.insert(0, str(ROOT / "db"))
@@ -285,11 +306,23 @@ class RealBackend:
             state = co.FoulingState(delta_f_m=st["delta"], cum_clean_hours=st["cum"], time_since_last_clean=0.0, n_cleanings=n_done)
             r = co.evaluate_policy(policy, days * 24, seed, scenario, state, origin + 1)
             keys = ("cleaning_cost", "downtime_cost", "pumping_energy_cost", "thermal_penalty_cost")
+            reasons = []
+            if r["first_breach"]:
+                names = {"Rf": "fouling (Rf) limit", "dP": "pressure-drop limit", "BSI": "severity-index limit"}
+                reasons.append(f"passes the {names[r['first_breach']['metric']]} on day {(r['first_breach']['hour'] - origin) / 24:.0f}")
+            if not r["within_biocide_permit"]:
+                reasons.append(f"uses {r['biocide_kg']:.0f} kg biocide, over the {r['biocide_limit_kg']:.0f} kg allowed for {days} days")
             return {"window_days": days, "total_cost": r["total_cost"], "cost_per_day": r["total_cost"] / days,
                     "cost_breakdown": {k: r[k] for k in keys} | {"cleanings_mechanical": r["cleanings_mechanical"],
                                                                 "cleanings_chemical": r["cleanings_chemical"],
-                                                                "biocide_kg": r["biocide_kg"]},
-                    "feasible": r["is_feasible"], "hours_above_limit": r["hours_above_limit"],
+                                                                "biocide_kg": r["biocide_kg"],
+                                                                "biocide_limit_kg": r["biocide_limit_kg"],
+                                                                "downtime_hours": r["downtime_hours"],
+                                                                "pump_energy_kwh": r["pump_energy_kwh"],
+                                                                "thermal_shortfall_mwh": r["thermal_shortfall_mwh"],
+                                                                "co2_kg": r["co2_kg"]},
+                    "feasible": r["is_feasible"], "infeasible_reason": "; ".join(reasons) or None,
+                    "hours_above_limit": r["hours_above_limit"],
                     "peak_rf": r["peak_rf"], "peak_dp_kpa": r["peak_dp_kpa"]}
 
         try:
@@ -333,6 +366,45 @@ class RealBackend:
                             "and review the situation.")
         return {"candidates": cands, "recommended_interval_days": rec, "compared": base["compared"], "epsilon": eps,
                 "origin_hour": base["origin_hour"], "state_estimate_um": base["state_estimate_um"], "notes": notes}
+
+    def rf_table(self, q):
+        ds_id = q.get("dataset")
+        df = self._df(ds_id)
+        every = _int(q.get("every", 24), "every", 6, 168)
+        return self._cached(("rf_table", ds_id, every), lambda: self._rf_table(df, every))
+
+    def _rf_table(self, df, every):
+        c, F = self.config, self.F
+        dp_clean = self.co.fouling_indicators.compute_clean_pressure_drop()
+        truth = df.set_index("time_hours")["Rf_fouling_resistance"]
+        clean_hours = df.loc[df["cleaning_event"] == 1, "time_hours"].astype(int).tolist()
+        rows, prev = [], -1
+        for origin in range(max(every - 1, self.D.BURN_IN_HOURS - 1), len(df), every):
+            r = F.rf_breakdown(df, origin)
+            pct = 100.0 * r["rf"] / c.CRITICAL_RF_M2K_W
+            u_from_rf = c.U_CLEAN_DESIGN_W_M2K / (1.0 + c.U_CLEAN_DESIGN_W_M2K * r["rf"])
+            cleaned = [h for h in clean_hours if prev < h <= origin]
+            r.update({
+                "day": round((origin + 1) / 24.0, 2),
+                "timestamp": str(df["timestamp"].iloc[origin]),
+                "pct_of_rf_limit": pct,
+                "cooling_lost_pct": 100.0 * (1.0 - u_from_rf / c.U_CLEAN_DESIGN_W_M2K),
+                "extra_pressure_pct": 100.0 * (r["dp_measured_kpa"] / dp_clean - 1.0),
+                "status": rf_status(pct),
+                "rf_true": float(truth.loc[origin]),
+                "cleaned_since_last_row": [{"hour": h, "type": "mechanical" if df["cleaning_type"].iloc[h] == "Mechanical_Balls" else "chemical"} for h in cleaned],
+            })
+            rows.append(r)
+            prev = origin
+        return {
+            "every_h": every,
+            "constants": {"u_clean": c.U_CLEAN_DESIGN_W_M2K, "k_biofilm": c.BIOFILM_THERMAL_CONDUCTIVITY_W_MK,
+                          "dp_clean_kpa": dp_clean, "rf_limit": c.CRITICAL_RF_M2K_W, "dp_limit_kpa": c.CRITICAL_DELTA_P_KPA,
+                          "block_hours": self.D.BURN_IN_HOURS, "tube_inner_diameter_m": c.TUBE_INNER_DIAMETER_M,
+                          "tube_length_m": c.TUBE_LENGTH_M, "number_of_tubes": c.NUMBER_OF_TUBES},
+            "status_rule": STATUS_RULE,
+            "rows": rows,
+        }
 
     def metrics(self):
         from ml.evaluate import METRICS_PATH
@@ -387,7 +459,8 @@ def make_handler(backend):
             url = urlparse(self.path)
             q = {k: v[-1] for k, v in parse_qs(url.query).items()}
             routes = {"/api/meta": backend.meta, "/api/series": lambda: backend.series(q),
-                      "/api/metrics": backend.metrics, "/api/correction": backend.correction}
+                      "/api/metrics": backend.metrics, "/api/correction": backend.correction,
+                      "/api/rf_table": lambda: backend.rf_table(q)}
             if url.path in routes:
                 return self._dispatch(routes[url.path])
             if url.path.startswith("/api/"):

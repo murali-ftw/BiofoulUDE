@@ -20,9 +20,9 @@ for p in (APP_DIR, APP_DIR / "db"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-import config
-import cleaning_optimizer as co
-import synthetic_generator
+from core import config
+from optimizer import cleaning_optimizer as co
+from core import synthetic_generator
 import generate as db_generate
 
 COST_COMPONENTS = ("cleaning_cost", "downtime_cost", "pumping_energy_cost", "thermal_penalty_cost")

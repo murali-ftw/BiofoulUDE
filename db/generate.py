@@ -18,10 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import config
-import fouling_indicators
-import synthetic_generator
-from synthetic_generator import GeneratorScenario
+from core import config
+from core import fouling_indicators
+from core import synthetic_generator
+from core.synthetic_generator import GeneratorScenario
 
 DB_DIR = Path(__file__).resolve().parent
 DATASET_PATH = DB_DIR / "biofouling_synthetic_dataset.csv"

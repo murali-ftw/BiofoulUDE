@@ -14,9 +14,9 @@ if str(APP_DIR) not in sys.path:
 import ml  # noqa: F401
 import torch
 
-import cleaning_optimizer as co
-import config
-import synthetic_generator as sg
+from optimizer import cleaning_optimizer as co
+from core import config
+from core import synthetic_generator as sg
 from ml import physics_torch as pt
 from ml.ude import CHEMICAL, MECHANICAL, NONE, FoulingUDE, cum_clean_hours_from_log, hours_since_cleaning_from_log
 

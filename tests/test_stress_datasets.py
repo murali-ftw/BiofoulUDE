@@ -18,8 +18,8 @@ for p in (APP_DIR, APP_DIR / "db"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-import fouling_indicators
-import synthetic_generator
+from core import fouling_indicators
+from core import synthetic_generator
 import generate as db_generate
 
 DB_DIR = APP_DIR / "db"

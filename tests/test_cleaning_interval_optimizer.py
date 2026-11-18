@@ -25,11 +25,11 @@ APP_DIR = Path(__file__).resolve().parent.parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-import config
-import fouling_indicators
-import synthetic_generator
-import cleaning_optimizer
-import improved_model
+from core import config
+from core import fouling_indicators
+from core import synthetic_generator
+from optimizer import cleaning_optimizer
+from legacy import improved_model
 
 
 class TestCleaningIntervalOptimizer(unittest.TestCase):
