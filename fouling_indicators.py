@@ -207,3 +207,24 @@ def compute_heat_duty_mw(
     """Compute transferred heat duty in Megawatts (MW)."""
     Q_watts = U_overall * area_m2 * delta_T_lmtd
     return float(Q_watts / 1e6)
+
+
+def first_limit_crossings(df, rf_crit: float = config.CRITICAL_RF_M2K_W, dp_crit_kpa: float = config.CRITICAL_DELTA_P_KPA, bsi_crit: float = config.CRITICAL_BSI_SCORE) -> dict:
+    """
+    For a generated dataset, return the peak value and first hour above the limit (None if never)
+    for Rf (true), pressure drop (true) and BSI.
+    """
+    out = {}
+    for name, col, limit in [
+        ("Rf", "Rf_fouling_resistance", rf_crit),
+        ("dP", "delta_P_true_kPa", dp_crit_kpa),
+        ("BSI", "bsi_score", bsi_crit),
+    ]:
+        above = df.index[df[col] > limit]
+        out[name] = {
+            "limit": float(limit),
+            "peak": float(df[col].max()),
+            "first_hour": int(df["time_hours"].iloc[above[0]]) if len(above) else None,
+            "hours_above": int(len(above)),
+        }
+    return out

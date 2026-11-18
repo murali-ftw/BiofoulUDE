@@ -86,6 +86,32 @@ class FoulingState:
     n_cleanings: int = 0                 # cleanings performed so far
 
 
+@dataclass(frozen=True)
+class GeneratorScenario:
+    """
+    Optional mechanisms that the nominal ODE lacks. The defaults reproduce the nominal dataset.
+
+    k_dep_drift:        linear multiplicative drift of the deposition constant,
+                        K_dep(h) = K_DEPOSITION * (1 + k_dep_drift * h / 8760).
+    scale_rate_m_per_h: slow, temperature-independent deposit added to delta every hour (m/h).
+    bloom_events:       (start_hour, duration_hours, multiplier) tuples; biological deposition is
+                        multiplied by `multiplier` for start_hour <= h < start_hour + duration_hours.
+    """
+    k_dep_drift: float = 0.0
+    scale_rate_m_per_h: float = 0.0
+    bloom_events: Tuple[Tuple[int, int, float], ...] = ()
+
+    def deposition_multiplier(self, hour: int) -> float:
+        mult = 1.0 + self.k_dep_drift * hour / 8760.0
+        for start, duration, factor in self.bloom_events:
+            if start <= hour < start + duration:
+                mult *= factor
+        return mult
+
+
+NOMINAL_SCENARIO = GeneratorScenario()
+
+
 # A cleaning policy is called once per hour, after that hour's growth, as
 #     policy(hour, state) -> None | MECHANICAL | CHEMICAL
 CleaningPolicy = Callable[[int, FoulingState], Optional[str]]
@@ -118,6 +144,15 @@ def no_cleaning_policy(hour: int, state: FoulingState) -> Optional[str]:
     return None
 
 
+def fixed_interval_policy(interval_hours: float) -> CleaningPolicy:
+    """Clean every `interval_hours`, alternating MECHANICAL (1st, 3rd, ...) and CHEMICAL (2nd, 4th, ...)."""
+    def policy(hour: int, state: FoulingState) -> Optional[str]:
+        if state.time_since_last_clean >= interval_hours:
+            return MECHANICAL if (state.n_cleanings % 2 == 0) else CHEMICAL
+        return None
+    return policy
+
+
 def step(
     state: FoulingState,
     hour: int,
@@ -125,6 +160,7 @@ def step(
     rng: np.random.Generator,
     start_dt: datetime,
     dP_clean_kpa: float,
+    scenario: GeneratorScenario = NOMINAL_SCENARIO,
 ) -> Tuple[FoulingState, Dict[str, Any]]:
     """
     Advance the simulator by one hour.
@@ -179,6 +215,8 @@ def step(
     # Nutrient availability index (higher in spring/summer runoff)
     c_nutrient = 1.0 + 0.3 * math.sin(phase)
     m_dot_dep = config.K_DEPOSITION * mu_bio * c_nutrient * phi_ind * carry_factor
+    # Scenario drift and bloom events (multiplier is exactly 1.0 for the nominal scenario)
+    m_dot_dep = m_dot_dep * scenario.deposition_multiplier(h)
 
     # Hydraulic wall shear stress calculation
     try:
@@ -201,7 +239,7 @@ def step(
     m_dot_rem = config.K_REMOVAL * tau_w * delta_f_m
 
     # Euler integration of biofilm thickness
-    d_delta = (m_dot_dep - m_dot_rem) * 1.0  # 1 hour step
+    d_delta = (m_dot_dep - m_dot_rem + scenario.scale_rate_m_per_h) * 1.0  # 1 hour step
     state.delta_f_m = max(0.0, min(config.BIOFILM_MAX_THICKNESS_M, delta_f_m + d_delta))
     state.cum_clean_hours += 1.0
     state.time_since_last_clean += 1.0
@@ -299,17 +337,27 @@ class BiofoulingSyntheticGenerator:
         inject_cleanings: bool = True,
         start_date: str = "2026-01-01 00:00:00",
         cleaning_policy: Optional[CleaningPolicy] = None,
+        cleaning_interval_hours: Optional[float] = None,
+        scenario: GeneratorScenario = NOMINAL_SCENARIO,
     ) -> pd.DataFrame:
         """
         Generate an hourly dataset.
-        cleaning_policy overrides the default policy; inject_cleanings=False means never clean.
+        Cleaning, in order of precedence: cleaning_policy if given; else inject_cleanings=False
+        means never clean; else cleaning_interval_hours gives a fixed alternating schedule;
+        else the default policy. start_date only sets timestamps and season labels; the water
+        temperature cycle is driven by the hour index.
         """
         # Reset RNG for strict reproducibility
         self.rng = np.random.default_rng(self.seed)
         start_dt = datetime.fromisoformat(start_date)
 
         if cleaning_policy is None:
-            cleaning_policy = default_cleaning_policy if inject_cleanings else no_cleaning_policy
+            if not inject_cleanings:
+                cleaning_policy = no_cleaning_policy
+            elif cleaning_interval_hours is not None:
+                cleaning_policy = fixed_interval_policy(cleaning_interval_hours)
+            else:
+                cleaning_policy = default_cleaning_policy
 
         # Baseline clean hydraulic pressure drop
         dP_clean_pa, u_clean, _ = fouling_indicators.compute_hydraulic_pressure_drop(
@@ -321,7 +369,7 @@ class BiofoulingSyntheticGenerator:
         state = FoulingState()  # Initial clean state (0 meters)
         records = []
         for h in range(hours):
-            state, record = step(state, h, cleaning_policy, self.rng, start_dt, dP_clean_kpa)
+            state, record = step(state, h, cleaning_policy, self.rng, start_dt, dP_clean_kpa, scenario)
             records.append(record)
 
         df = pd.DataFrame(records)
