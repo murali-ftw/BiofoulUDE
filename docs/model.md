@@ -4,8 +4,9 @@ This document describes the proposed modelling pipeline and how far it has been 
 
 > **Status labels.** **[EXISTS]** means the code is in this repository today.
 > **[PROPOSED]** means it is designed here but not yet implemented. Everything about the
-> Universal Differential Equation (UDE), its training and the new decision layer is **[PROPOSED]**.
-> Section 9 has the full status table.
+> Universal Differential Equation (UDE) and its training is **[PROPOSED]**. The decision layer
+> exists as a deterministic re-simulation sweep; its UDE-driven, chance-constrained form is
+> **[PROPOSED]**. Section 9 has the full status table.
 
 All data is synthetic. See [problem_statement.md](problem_statement.md) for scope and limitations.
 
@@ -90,7 +91,8 @@ limit (180 µm), dP ≈ 13.2 kPa and tau_w ≈ 10.3 Pa.
 ### Equation
 
 ```
-d(delta)/dt = K_dep * r(T) * g_theta(T, v, season)  -  K_rem * tau_w(v) * delta
+d(delta)/dt = K_dep * r(T) * g_theta(T, v, season, delta/delta_max, hours_since_cleaning)
+              -  K_rem * tau_w(v) * delta
               \_________ deposition ____________/      \___ shear removal ___/
 ```
 
@@ -101,16 +103,39 @@ d(delta)/dt = K_dep * r(T) * g_theta(T, v, season)  -  K_rem * tau_w(v) * delta
 
 ### The network `g_theta`
 
+Five physical inputs, presented to the network as six numbers (season is encoded as sin/cos):
+
+| Input | Normalisation fed to the network | Typical range |
+|---|---|---|
+| Water temperature `T` (°C) | `(T - T_BIO_MIN_C) / (T_BIO_MAX_C - T_BIO_MIN_C)` = `(T - 6) / 39` | about 0.05 to 0.6 |
+| Tube velocity `v` (m/s) | `v / v_nom`, with `v_nom` = 1.414 m/s (clean tube at `COOLING_WATER_MASS_FLOW_KG_S`) | about 0.96 to 1.07 |
+| Season, hour of year `t` | `sin(2*pi*t/8760)`, `cos(2*pi*t/8760)` | -1 to 1 |
+| Relative thickness | `delta / BIOFILM_MAX_THICKNESS_M` (350e-6 m) | 0 to 1 |
+| Hours since cleaning `h_c` | `min(h_c / 720, 3.0)` (clip at 3 so the 90-day sweep range stays distinct) | 0 to 3 |
+
 ```
-inputs : T (scaled), v (scaled), sin(2*pi*t/8760), cos(2*pi*t/8760)
+inputs : 6 numbers (table above)
 hidden : 2 layers x 16 units, tanh
 output : linear layer, weights and bias initialised to zero
          g_theta(.) = 1 + NN(.)   ->   g = 1 exactly at initialisation
 ```
 
-Because the last layer starts at zero, **the untrained UDE equals the pure physics ODE**. Training
-can only move it away from physics if the data supports that. To keep deposition non-negative, the
-output is clamped at `g >= 0`.
+About 400 parameters in total.
+
+- **Where the inputs come from.** `T`, `v` and the season come from measurements and the clock,
+  and `hours_since_cleaning` from the maintenance log. `delta/delta_max` is the model's **latent
+  state**. In training it is rolled forward by the UDE itself, never read from the dataset. In real
+  use it would come from a state estimator (for example a filter that assimilates measured U and dP).
+- **Why these two extra inputs.** The generator's deposition depends on thickness (carrying
+  capacity `1 - delta/delta_max`) and on time since cleaning (induction lag). Without these inputs,
+  `g_theta` cannot represent either effect.
+- **Physics stays the default.** Because the last layer starts at zero, **the untrained UDE equals
+  the pure physics ODE**, and the L2 penalty `lambda * mean((g_theta - 1)^2)` (Section 5) keeps `g`
+  near 1 unless the data needs otherwise. To keep deposition non-negative, the output is clamped
+  at `g >= 0`.
+- **Overfitting risk.** More inputs mean more ways to fit noise, and a year contains only about 12
+  cleaning cycles. Keep the network this small, and use the stress and mismatch datasets
+  (Section 8) for validation, not only a slice of the nominal year.
 
 ### Learnable physics parameters
 
@@ -166,9 +191,13 @@ tolerance before it is used.
 | Regularisation | weight decay on `theta`, plus `lambda * mean((g_theta - 1)^2)` | Keeps the correction small unless the data needs it |
 | Split | Chronological train / validation / test, no shuffling | No future information in training |
 | Uncertainty | Ensemble of 5 seeds | Spread of the forecasts is used by the decision layer |
-| Device | CPU is enough (one state, ~1,000 parameters); Apple MPS optional | |
+| Device | CPU is enough (one state, about 400 network parameters); Apple MPS optional | |
 
-## 6. Decision layer **[PROPOSED]**
+## 6. Decision layer
+
+**[EXISTS]** in `cleaning_optimizer.py`: the shared cost function, forward re-simulation of any
+cleaning policy, and the exact 1..90-day sweep, all using the generator's physics.
+**[PROPOSED]**: replacing that physics with the UDE forecast ensemble, and the chance constraint.
 
 ### Cost per day for cleaning interval T (days)
 
@@ -183,9 +212,17 @@ C(T)  =  -----------------------------------------------------------------------
 | `C_clean` | cost per cleaning | `MECHANICAL_CLEANING_COST` = 3500 $ (chemical: 6500 $) |
 | `C_downtime` | `DOWNTIME_HOURS_PER_CLEANING * DOWNTIME_COST_PER_HOUR` | 4 h x 250 $/h = 1000 $ |
 | `c_pump` | `(dP - dP_clean) * V_dot / PUMP_EFFICIENCY * ELECTRICITY_COST_PER_KWH` | 0.75, 0.12 $/kWh |
-| `c_thermal` | `(Q_clean - Q(U)) * THERMAL_PENALTY_COST_PER_MWH_LOSS` | 35 $/MWh |
+| `c_thermal` | `(Q_clean - Q(U)) * THERMAL_PENALTY_COST_PER_MWH_LOSS`, `Q = U * A * DESIGN_LMTD_K` | 35 $/MWh, LMTD 14 K |
 
-`Rf(t)` comes from the UDE forecast starting at the post-cleaning state.
+Implementation (`cost_breakdown`): mechanical cleanings cost `MECHANICAL_CLEANING_COST` and
+chemical ones `CHEMICAL_CLEANING_COST`. `dP` and `Q` are evaluated from the simulated thickness at
+nominal flow, so the penalties measure the effect of fouling only. One heat-duty definition
+(`fouling_indicators.DESIGN_LMTD_K` = 14 K) is used everywhere. No other multipliers are applied.
+Today `Rf(t)` comes from the generator's physics simulated forward. With the UDE it will come
+from the forecast, starting at the post-cleaning state.
+
+A policy is **feasible** if true Rf, true dP and BSI never exceed their limits, and biocide use
+stays within `ANNUAL_BIOCIDE_PERMIT_LIMIT_KG` (pro-rated for windows shorter than a year).
 
 ### Constraints
 
@@ -202,8 +239,8 @@ stated wherever results are reported.
 ### Solving it
 
 **Exact 1-D search:** evaluate `C(T)` for every integer `T = 1 ... 90` days, discard infeasible
-values, and pick the minimum. That is 90 forecasts of a one-state ODE, which takes well under a
-second.
+values, and pick the minimum. With the generator's physics, one simulated year takes about 0.1 s,
+so a full sweep takes about 9 s. A torch UDE run in batch should be faster.
 
 **Why not PSO (particle swarm optimisation)?** There is **one scalar decision variable** with a
 small, bounded integer range. Exhaustive search is exact, deterministic and cheap, so a
@@ -232,54 +269,81 @@ specifications.
 | Ridge + gradient boosting (`improved_model.py`) | [EXISTS] | Same |
 | Plain fitted ODE (UDE with `g_theta` removed, only `K_dep`, `K_rem` fitted) | [PROPOSED] | Shows what the neural correction adds |
 | Physics-guided LSTM | [PROPOSED, optional] | Only if time allows |
-| Fixed 30-day schedule | [EXISTS, needs rework] | Schedule baseline for the decision layer |
+| Fixed 30-day schedule | [EXISTS] | Re-simulated, shared cost function |
+| Best fixed interval (1..90 d sweep) | [EXISTS] | Stronger schedule baseline than fixed 30 d |
+| Condition-based (clean at a fraction of the Rf/dP limits) | [EXISTS] | Idealised: triggers on the true simulated state |
+| Never clean | [EXISTS] | Upper bound on fouling penalties |
 
-## 8. Evaluation plan **[PROPOSED]**
+## 8. Evaluation plan
 
-### Forecast evaluation
+### Datasets **[EXISTS]** in `db/` (regenerate with `python db/generate.py`)
+
+| File | Use | Limits crossed |
+|---|---|---|
+| `biofouling_synthetic_dataset.csv` (seed 42) | training / validation / test, chronological | none |
+| `stress_no_clean.csv` (seed 43) | constraint logic; long uncleaned growth | Rf, dP, BSI |
+| `stress_long_interval.csv` (seed 44, 90-day cleaning) | constraint logic at long intervals | Rf, BSI |
+| `mismatch_stress.csv` (seed 45, 60-day cleaning) | **held-out test only**: drift, scale term and bloom that the UDE structure lacks | Rf, dP, BSI |
+
+### Forecast evaluation **[PROPOSED]**
 
 - **Leak-free target:** predict `Rf(t + h)` using only data up to time `t`. Inputs must not
-  include `U` or `dP` measured after `t`.
+  include `U` or `dP` measured after `t`, and same-time `U` must not be used as a regressor.
+  The existing Ridge and Ridge+GBM baselines must be re-run on this target.
 - **Horizons:** h = 1 h, 24 h, 72 h, 168 h.
 - **Metrics:** MAE, RMSE, R² per horizon, and skill relative to persistence.
 
-### Mismatched test set
+### Mismatched test set **[EXISTS]**
 
 If the UDE is tested on data from the same ODE that generated its training data, the test is too
-easy. A **second synthetic dataset** will come from a deliberately different generator:
+easy. `mismatch_stress.csv` comes from the generator with mechanisms the UDE structure does not
+contain (`synthetic_generator.GeneratorScenario`):
 
-- `K_dep` drifts slowly through the year (for example, changing water quality);
-- an extra **scale-deposition term** not present in the UDE structure;
-- a **bloom event**: a few weeks of strongly increased deposition.
+- `k_dep_drift = 0.5`: deposition rises linearly by 50% over the year;
+- `scale_rate_m_per_h = 5e-9`: a slow, temperature-independent scale deposit;
+- one bloom: deposition x3 for 504 h from hour 4300 (late June).
 
 The UDE, baselines and schedules are all tested on this set without retraining on it.
 
-### Schedule evaluation
+### Schedule evaluation **[EXISTS for physics-based policies; PROPOSED for the UDE policy]**
 
-Simulate a full year under each policy (fixed 30-day, and the UDE-based rolling-horizon interval)
-**on the same generator**, so each policy's cleanings actually change the fouling that follows.
-Report total cost, number of cleanings, downtime, pumping energy, CO2e, biocide use against the
-permit, and constraint violations.
+`cleaning_optimizer.simulate_policy` simulates a full year under each policy **on the same
+generator and the same noise sequence**, so each policy's own cleanings change the fouling that
+follows. `CleaningScheduleOptimizer.compare_strategies` reports total cost and its four
+components, cleanings by type, biocide kg, peak Rf/dP/BSI, hours above any limit, and
+feasibility. The UDE-driven rolling-horizon policy will be added as a further row.
+
+Current results (synthetic, generator physics, one year):
+
+| Scenario | Fixed 30 d | Best fixed interval | Condition-based 0.8 x limits | Best condition-based | Never clean |
+|---|---|---|---|---|---|
+| Nominal (seed 42) | $259,120, feasible | 16 d: $217,817 | $331,068 | 0.55 x: $205,501 | $625,437, infeasible |
+| Mismatch (seed 45) | $320,748, **infeasible** (383 h over a limit) | 14 d: $254,615 | $379,455 | 0.55 x: $235,139 | $669,983, infeasible |
+
+The thermal penalty dominates the cost, so the optimum cleans about twice as often as fixed
+30 d. That is a consequence of the illustrative cost constants, not a general finding.
 
 ## 9. Current implementation status
 
 | Component | File | Status | Notes |
 |---|---|---|---|
 | Physical constants, thresholds, costs | `config.py` | EXISTS | |
-| Synthetic data generator | `synthetic_generator.py` | EXISTS | Deposition includes nutrient, induction and carrying-capacity factors; cleans every 720 h or at 230 µm |
+| Synthetic data generator | `synthetic_generator.py` | EXISTS | One-hour `step()` function, pluggable cleaning policy, optional `GeneratorScenario` (drift, scale, blooms); default cleans every 720 h, alternating mechanical/chemical |
+| Stress and mismatch datasets | `db/generate.py` | EXISTS | Four files, fixed seeds, byte-reproducible |
 | Thermal and hydraulic physics (numpy) | `fouling_indicators.py` | EXISTS | |
 | Chronological splits, feature pipeline | `preprocessor.py` | EXISTS | Features include same-time `U`, so the target leaks (below) |
 | Ridge baseline | `baseline_model.py` | EXISTS | Predicts same-time `Rf` from same-time `U`; not a forecast |
 | Ridge + GBM hybrid | `improved_model.py` | EXISTS | Same leakage; its multi-step "forecast" holds the last `Rf` constant |
-| Scenario cleaning-interval optimiser | `cleaning_optimizer.py` | EXISTS | Re-simulates the generator's own physics; **does not use any ML forecast** |
-| Fixed vs condition-based comparison | `cleaning_optimizer.py` | EXISTS, not reliable | The condition-based path does not re-simulate fouling after its own cleanings and uses hand-set multipliers (e.g. `* 0.75`, `2.8` vs `3.5` MW); its savings figure should not be quoted |
+| Shared cost function | `cleaning_optimizer.cost_breakdown` | EXISTS | `config.py` constants only |
+| Policy re-simulation | `cleaning_optimizer.simulate_policy` | EXISTS | Fixed interval, condition-based, never clean, immediate once |
+| Strategy comparison | `CleaningScheduleOptimizer.compare_strategies` | EXISTS | See Section 8 |
+| Interval optimiser (exact 1..90 d sweep) | `CleaningIntervalOptimizer.optimize_interval` | EXISTS | Deterministic, uses generator physics; **does not use any ML forecast** yet |
 | Sustainability accounting | `sustainability_metrics.py` | EXISTS | |
 | Torch observation model | — | PROPOSED | |
 | UDE (`g_theta`, learnable `K_dep`, `K_rem`) | — | PROPOSED | |
 | Multiple-shooting training, 5-seed ensemble | — | PROPOSED | |
 | Leak-free multi-horizon evaluation | — | PROPOSED | |
-| Mismatched synthetic dataset | — | PROPOSED | |
-| 1-D chance-constrained interval search | — | PROPOSED | Replaces the current optimiser |
+| Chance constraint and UDE forecast in the interval search | — | PROPOSED | TODO marked in `CleaningIntervalOptimizer` |
 
 **About the existing ML models.** They use same-time `U_overall_meas` as an input to predict
 same-time `Rf_fouling_resistance`. Because `Rf = 1/U - 1/U_clean`, their R² of about 0.91–0.93
@@ -297,34 +361,47 @@ fouling_indicators.py      thermal and hydraulic physics
 preprocessor.py            splits and features
 baseline_model.py          Ridge baseline
 improved_model.py          Ridge + GBM baseline
-cleaning_optimizer.py      current optimiser (to be replaced)
+cleaning_optimizer.py      cost function, policy re-simulation, strategy comparison, interval sweep
 sustainability_metrics.py  energy, CO2e, biocide accounting
 main.py                    end-to-end run
 tests/                     unit tests
-db/                        synthetic dataset and generate.py
+db/                        nominal, stress and mismatch datasets, and generate.py
 docs/                      this document and the problem statement
 ```
 
 ### Known limitations
 
 - **Synthetic data only.** No plant validation of any kind.
-- **Limits are never reached in the current dataset.** In the seed-42 dataset the generator's own
-  ~30-day cleaning keeps Rf at or below about 2.0e-4 (limit 3.0e-4), dP at or below about
-  12.3 kPa (limit 16) and BSI at or below about 57 (limit 75). Constraint handling therefore
-  needs scenarios with longer intervals or faster growth to be tested at all.
-- **Every cleaning in the dataset is chemical.** The generator chooses the cleaning type from
-  whether the hour is even or odd, but its 720 h trigger always fires on an odd hour. So all 12
-  events are `Biocide_Shock` (95% removal, 15 kg biocide each, 180 kg/yr) and mechanical cleaning
-  never appears.
-- **Structural mismatch is built in.** The generator's deposition also depends on thickness
-  (carrying capacity `1 - delta/delta_max`) and on time since cleaning (induction lag). The
-  proposed `g_theta(T, v, season)` sees neither directly. It may need `delta/delta_max` and
-  time-since-cleaning as extra inputs. This is an open design choice.
 - **Units of `K_REMOVAL`.** `config.py` labels it m/(Pa·h), but in `K_REMOVAL * tau_w * delta`
   the dimensionally consistent unit is 1/(Pa·h). The value is unaffected; only the label is wrong.
-- **Inconsistent LMTD.** The generator uses dT_lm = 14 K for heat duty, while the default in
-  `compute_heat_duty_mw` is 12 K. The decision layer must use one value consistently.
+- **Nominal LMTD.** `DESIGN_LMTD_K` = 14 K is a fixed design value. The generator's own stream
+  temperatures (process side 48 °C, cooling water 9–27 °C) imply a larger, seasonally varying
+  LMTD, which the simulator does not resolve.
+- **BSI uses measured dP.** Sensor noise can push BSI over its limit on a single hour, which
+  makes near-limit states (e.g. 170 µm in summer) infeasible immediately.
+- **Idealised condition-based policy.** It triggers on the true simulated state, not on noisy
+  measurements, so it is an upper bound on what a real condition-based rule could achieve.
 - **Lumped 1-D model:** uniform film thickness, constant `k_biofilm`, a single representative
   tube.
 - **Coarse uncertainty:** a 5-member ensemble cannot estimate small exceedance probabilities.
 - **Illustrative costs:** values in `config.py` are not plant data.
+
+### Known issues resolved in this iteration
+
+- **Cleaning-type bug fixed.** The generator chose the type by hour parity, and its 720 h
+  trigger always fires on an odd hour, so every cleaning was chemical (12 x 15 kg = 180 kg
+  biocide). The default policy now alternates by cleaning number (6 mechanical, 6 chemical,
+  90 kg).
+- **Old savings figure invalid and removed.** The earlier "78.7% cost reduction" of
+  condition-based over fixed 30-day cleaning is **invalid and must not be quoted**. Both old
+  evaluators priced the dataset's own trajectory (generated under a different, 720 h schedule)
+  instead of re-simulating their own cleanings, and they used hand-set multipliers (`* 1.2`,
+  `* 1.1`, `* 0.75`, `* 0.15`, 3.5 vs 2.8 MW) and left out downtime. All strategies are now
+  re-simulated and priced by one cost function (Section 6).
+- **Limits never reached in nominal data.** In the nominal year Rf peaks at 2.0e-4 (limit
+  3.0e-4), dP at 12.1 kPa (limit 16) and BSI at 57 (limit 75). Stress and mismatch datasets that
+  do cross the limits were added (Section 8).
+- **Network inputs.** `g_theta` now also sees `delta/delta_max` and `hours_since_cleaning`
+  (Section 3), so it can represent the carrying-capacity and induction effects.
+- **One LMTD.** All heat-duty calculations use `fouling_indicators.DESIGN_LMTD_K` = 14 K. The
+  unused 12 K default was removed; no dataset changed.
