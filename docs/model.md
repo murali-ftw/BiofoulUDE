@@ -301,6 +301,7 @@ cleaning_optimizer.py      current optimiser (to be replaced)
 sustainability_metrics.py  energy, CO2e, biocide accounting
 main.py                    end-to-end run
 tests/                     unit tests
+db/                        synthetic dataset and generate.py
 docs/                      this document and the problem statement
 ```
 
@@ -311,6 +312,10 @@ docs/                      this document and the problem statement
   ~30-day cleaning keeps Rf at or below about 2.0e-4 (limit 3.0e-4), dP at or below about
   12.3 kPa (limit 16) and BSI at or below about 57 (limit 75). Constraint handling therefore
   needs scenarios with longer intervals or faster growth to be tested at all.
+- **Every cleaning in the dataset is chemical.** The generator chooses the cleaning type from
+  whether the hour is even or odd, but its 720 h trigger always fires on an odd hour. So all 12
+  events are `Biocide_Shock` (95% removal, 15 kg biocide each, 180 kg/yr) and mechanical cleaning
+  never appears.
 - **Structural mismatch is built in.** The generator's deposition also depends on thickness
   (carrying capacity `1 - delta/delta_max`) and on time since cleaning (induction lag). The
   proposed `g_theta(T, v, season)` sees neither directly. It may need `delta/delta_max` and

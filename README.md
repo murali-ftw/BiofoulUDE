@@ -31,6 +31,7 @@ cleaning_optimizer.py      current scenario-based cleaning-interval optimiser
 sustainability_metrics.py  pumping energy, CO2e and biocide accounting
 main.py                    runs the full pipeline end to end
 tests/                     unit tests
+db/                        synthetic dataset and its generator script
 docs/                      problem statement and model description
 ```
 
@@ -42,16 +43,12 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Generate data and run
+## Generate data, run, test
 
 ```bash
-python main.py                   # simulate (seed 42, 8,760 h), train baselines, optimise, report
-```
-
-## Tests
-
-```bash
-python -m pytest tests -q
+python db/generate.py            # write db/biofouling_synthetic_dataset.csv (seed 42, 8,760 h)
+python main.py                   # simulate, train baselines, optimise, report
+python -m pytest tests -q        # unit tests
 ```
 
 ## License

@@ -50,7 +50,7 @@ def run_full_pipeline(seed: int = config.DEFAULT_RANDOM_SEED, hours: int = 8760,
     print(f"Min Thermal Ratio:      {df['thermal_efficiency_ratio'].min()*100:.1f}%")
 
     if save_csv:
-        data_dir = Path(__file__).parent / "data"
+        data_dir = Path(__file__).parent / "db"
         data_dir.mkdir(parents=True, exist_ok=True)
         csv_path = data_dir / "biofouling_synthetic_dataset.csv"
         df.to_csv(csv_path, index=False)
