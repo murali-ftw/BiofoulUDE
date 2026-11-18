@@ -1,0 +1,25 @@
+{
+  "device": "cpu",
+  "timings": {
+    "cpu_float32": {
+      "median_s": 0.053038625002955087,
+      "min_s": 0.05193108299863525,
+      "model": "stand-in"
+    },
+    "cpu_float64": {
+      "median_s": 0.052484500003629364,
+      "min_s": 0.05170308300148463,
+      "model": "stand-in"
+    },
+    "mps_float32": {
+      "median_s": 0.16219229200214613,
+      "min_s": 0.16218337500322377,
+      "model": "stand-in"
+    }
+  },
+  "batch_windows": 64,
+  "rollout_hours": 336,
+  "torch": "2.15.0",
+  "machine": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "processor": "arm"
+}

@@ -6,5 +6,8 @@ scipy>=1.9.0
 pandas>=1.4.0
 scikit-learn>=1.1.0
 
+# UDE model (ml/)
+torch>=2.2
+
 # Testing
 pytest>=7.0
