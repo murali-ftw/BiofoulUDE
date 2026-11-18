@@ -263,7 +263,7 @@ def step(
     Rf_true = fouling_indicators.compute_thermal_resistance(delta_f_m)
     U_true = fouling_indicators.compute_degraded_U(config.U_CLEAN_DESIGN_W_M2K, Rf_true)
     thermal_eff_ratio = fouling_indicators.compute_thermal_efficiency_ratio(U_true)
-    heat_duty_mw = fouling_indicators.compute_heat_duty_mw(U_true, delta_T_lmtd=14.0)
+    heat_duty_mw = fouling_indicators.compute_heat_duty_mw(U_true)
 
     # Recalculate true pressure drop after potential cleaning
     dP_true_pa, u_true, f_true = fouling_indicators.compute_hydraulic_pressure_drop(

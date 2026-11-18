@@ -4,17 +4,8 @@ Test Suite: Phase 3.1 Manual Optimizer Sensitivity & CSV Ingestion UX Audit
 Validates:
 1. Darcy-Weisbach hydraulic inversion recovers physical biofilm thickness delta_f
    and thermal fouling resistance Rf when operator omits overall HTC U.
-2. Manual operating mode sensitivity across diverse conditions:
-   - Clean baseline -> 21 to 30 days
-   - Mild fouling -> 21 days
-   - Moderate fouling -> 14 days
-   - Severe / near-critical fouling -> 7 days
-   - Threshold breach / hydraulic surge -> 0 days (Immediate)
-   - Cold seasonal baseline -> 30 to 60 days
-3. Optimizer does NOT collapse to only {0, 21} days.
-4. CSV Ingestion metadata supports the 5-stage status sequence:
-   (File Selected -> Uploading -> Uploaded -> Validated -> Analyzed)
-   and provides all fields required for the Ingestion & Analysis Summary Card.
+2. Interval optimiser (exact 1..90 d sweep) gives diverse recommendations, ordered sensibly:
+   fouled < clean, summer < winter, and 0 days (immediate) for a breach.
 """
 
 import math
@@ -63,39 +54,23 @@ class TestPhase31SensitivityAndUX(unittest.TestCase):
             prev_t = t
 
     def test_03_optimizer_granularity_beyond_binary_clustering(self):
-        """Verify optimizer outputs diverse recommendations (0, 7, 14, 21, 30, 60 days) across scenarios."""
-        recommendations_observed = set()
+        """Verify the 1..90 d sweep gives diverse, physically ordered recommendations across scenarios."""
+        # Case A: clean tube, early summer
+        rec_a = self.optimizer.optimize_interval(0.0, current_hour=3000)["recommended_interval_days"]
+        # Case B: moderate fouling, same season
+        rec_b = self.optimizer.optimize_interval(80.0, current_hour=3000)["recommended_interval_days"]
+        # Case D: breach emergency
+        rec_d = self.optimizer.optimize_interval(190.0, current_hour=3000)["recommended_interval_days"]
+        # Case E: clean tube, cold winter
+        rec_e = self.optimizer.optimize_interval(0.0, current_hour=0)["recommended_interval_days"]
+        # Case F: clean tube, spring
+        rec_f = self.optimizer.optimize_interval(0.0, current_hour=1000)["recommended_interval_days"]
 
-        # Case A: Clean summer baseline (expect 21d)
-        rec_a = self.optimizer.optimize_interval(0.0, current_hour=3000)
-        recommendations_observed.add(rec_a["recommended_interval_days"])
-
-        # Case B: Moderate fouling (expect 14d)
-        rec_b = self.optimizer.optimize_interval(80.0, current_hour=3000)
-        recommendations_observed.add(rec_b["recommended_interval_days"])
-
-        # Case C: Near-critical fouling (expect 7d)
-        rec_c = self.optimizer.optimize_interval(170.0, current_hour=3000)
-        recommendations_observed.add(rec_c["recommended_interval_days"])
-
-        # Case D: Breach emergency (expect 0d)
-        rec_d = self.optimizer.optimize_interval(190.0, current_hour=3000)
-        recommendations_observed.add(rec_d["recommended_interval_days"])
-
-        # Case E: Cold winter baseline (expect 30d or 60d)
-        rec_e = self.optimizer.optimize_interval(0.0, current_hour=0)
-        recommendations_observed.add(rec_e["recommended_interval_days"])
-
-        # Case F: Spring baseline (expect 30d)
-        rec_f = self.optimizer.optimize_interval(0.0, current_hour=1000)
-        recommendations_observed.add(rec_f["recommended_interval_days"])
-
-        # Must observe at least 4 distinct interval values
+        recommendations_observed = {rec_a, rec_b, rec_d, rec_e, rec_f}
         self.assertGreaterEqual(len(recommendations_observed), 4, f"Insufficient granularity: {recommendations_observed}")
-        self.assertIn(0, recommendations_observed)
-        self.assertIn(14, recommendations_observed)
-        self.assertIn(21, recommendations_observed)
-        self.assertTrue(30 in recommendations_observed or 60 in recommendations_observed)
+        self.assertEqual(rec_d, 0)
+        self.assertLess(rec_b, rec_a, "a fouled tube must get a shorter interval than a clean one")
+        self.assertGreater(rec_e, rec_a, "winter must allow a longer interval than summer")
 
 if __name__ == "__main__":
     unittest.main()

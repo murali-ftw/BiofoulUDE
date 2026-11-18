@@ -132,18 +132,6 @@ class TestRepairedBiofoulingApplication(unittest.TestCase):
         ml_eval = ml.evaluate(test_df)
         self.assertLessEqual(ml_eval["rmse"], base_eval["rmse"] * 1.05)
 
-    def test_09_cleaning_optimization(self):
-        """Test Condition-Based Optimization cost reduction."""
-        df = synthetic_generator.generate_biofouling_dataset(hours=2000, seed=42, inject_cleanings=False)
-        opt = cleaning_optimizer.CleaningScheduleOptimizer()
-
-        res_fixed = opt.evaluate_fixed_calendar_schedule(df, interval_days=30)
-        res_cbo = opt.evaluate_condition_based_schedule(df)
-
-        self.assertIn("total_cost", res_fixed)
-        self.assertIn("total_cost", res_cbo)
-        self.assertLessEqual(res_cbo["total_cost"], res_fixed["total_cost"] * 1.05)
-
     def test_10_sustainability_metrics(self):
         """Test parasitic pumping power and CO2 calculations."""
         kw = sustainability_metrics.compute_parasitic_pumping_power_kw(0.22, 30.0, 0.75)

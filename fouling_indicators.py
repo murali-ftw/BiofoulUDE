@@ -199,12 +199,17 @@ def compute_biofouling_severity_index(
     return float(max(0.0, min(100.0, bsi)))
 
 
+# Design-point log-mean temperature difference used for every heat-duty calculation (K).
+# A nominal value: the simulator does not resolve the LMTD from its stream temperatures.
+DESIGN_LMTD_K: float = 14.0
+
+
 def compute_heat_duty_mw(
     U_overall: float,
     area_m2: float = config.TOTAL_HEAT_TRANSFER_AREA_M2,
-    delta_T_lmtd: float = 12.0,
+    delta_T_lmtd: float = DESIGN_LMTD_K,
 ) -> float:
-    """Compute transferred heat duty in Megawatts (MW)."""
+    """Compute transferred heat duty in Megawatts (MW): Q = U * A * LMTD."""
     Q_watts = U_overall * area_m2 * delta_T_lmtd
     return float(Q_watts / 1e6)
 

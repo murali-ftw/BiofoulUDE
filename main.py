@@ -87,28 +87,14 @@ def run_full_pipeline(seed: int = config.DEFAULT_RANDOM_SEED, hours: int = 8760,
     rmse_reduction = ((base_eval['rmse'] - ml_eval['rmse']) / base_eval['rmse']) * 100.0
     print(f"ML Model Accuracy Improvement: {rmse_reduction:.2f}% RMSE reduction over linear baseline.")
 
-    # 4. Cleaning Schedule Optimization
-    print("\n--- 4. Cleaning Strategy Optimization (Fixed vs Condition-Based) ---")
+    # 4. Cleaning Strategy Comparison (forward re-simulation, shared cost function)
+    print("\n--- 4. Cleaning Strategy Comparison (re-simulated, one cost function) ---")
     opt = cleaning_optimizer.CleaningScheduleOptimizer()
-    res_fixed = opt.evaluate_fixed_calendar_schedule(df, interval_days=30)
-    res_cbo = opt.evaluate_condition_based_schedule(df, cleaning_cost=config.MECHANICAL_CLEANING_COST)
-
-    savings = res_fixed["total_cost"] - res_cbo["total_cost"]
-    savings_pct = (savings / res_fixed["total_cost"]) * 100.0
-
-    print(f"Strategy: Fixed 30-Day Calendar Maintenance")
-    print(f"  Cleanings: {res_fixed['cleaning_count']} | Cleaning Cost: ${res_fixed['cleaning_cost']:,.2f}")
-    print(f"  Pumping Cost: ${res_fixed['pump_energy_cost']:,.2f} | Thermal Loss Cost: ${res_fixed['thermal_penalty_cost']:,.2f}")
-    print(f"  Total Annual Operational Cost: ${res_fixed['total_cost']:,.2f}")
-
-    print(f"\nStrategy: AI Condition-Based Optimization (CBO)")
-    print(f"  Cleanings: {res_cbo['cleaning_count']} | Cleaning Cost: ${res_cbo['cleaning_cost']:,.2f}")
-    print(f"  Pumping Cost: ${res_cbo['pump_energy_cost']:,.2f} | Thermal Loss Cost: ${res_cbo['thermal_penalty_cost']:,.2f}")
-    print(f"  Total Annual Operational Cost: ${res_cbo['total_cost']:,.2f}")
-    print(f"  Net Annual Savings:            ${savings:,.2f} ({savings_pct:.1f}% cost reduction)")
+    strategy_rows = opt.compare_strategies(hours=hours, seed=seed)
+    print(cleaning_optimizer.format_comparison_table(strategy_rows))
 
     # 4.B Predictive Cleaning Interval Optimizer
-    print("\n--- 4.B Predictive Cleaning Interval Optimizer (Scenario-Based) ---")
+    print("\n--- 4.B Next Cleaning Interval (exact 1..90 d sweep from the current state; no ML forecast yet) ---")
     latest_row = df.iloc[-1]
     interval_opt = cleaning_optimizer.CleaningIntervalOptimizer()
     interval_rec = interval_opt.optimize_interval(
@@ -140,9 +126,7 @@ def run_full_pipeline(seed: int = config.DEFAULT_RANDOM_SEED, hours: int = 8760,
         "seed": seed,
         "baseline_eval": base_eval,
         "ml_eval": ml_eval,
-        "fixed_schedule": res_fixed,
-        "condition_based": res_cbo,
-        "annual_savings_usd": round(savings, 2),
+        "strategy_comparison": strategy_rows,
         "sustainability": sust,
     }
     return summary
