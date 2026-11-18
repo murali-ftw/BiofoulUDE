@@ -13,10 +13,9 @@ synthetic data -> Universal Differential Equation (physics ODE + small neural-ne
                -> cost-optimal cleaning interval
 ```
 
-The UDE and the new interval search are **not implemented yet**. The repository currently contains
-the data generator, the fouling physics, two comparison forecasters (Ridge, Ridge+GBM) and the
-existing scenario-based cleaning optimiser. See [docs/](docs/) for the problem statement, the
-proposed model and an implementation-status table.
+The UDE is in [ml/](ml/README.md) (trained on measured U and dP only, with results), the
+re-simulation cost evaluation is in `cleaning_optimizer.py`, and [web/](web/README.md) is a local
+dashboard. See [docs/](docs/) for the problem statement, the model and its status.
 
 ## Repository layout
 
@@ -27,11 +26,13 @@ fouling_indicators.py      Rf -> U, Darcy-Weisbach/Haaland pressure drop, severi
 preprocessor.py            chronological split and feature pipeline
 baseline_model.py          Ridge comparison model
 improved_model.py          Ridge + gradient-boosting comparison model
-cleaning_optimizer.py      current scenario-based cleaning-interval optimiser
+cleaning_optimizer.py      shared cost function, policy re-simulation, interval sweep
+ml/                        UDE model, training, baselines, evaluation, forecast API
+web/                       local dashboard (python -m web.server; --mock without a model)
 sustainability_metrics.py  pumping energy, CO2e and biocide accounting
 main.py                    runs the full pipeline end to end
 tests/                     unit tests
-db/                        synthetic dataset and its generator script
+db/                        nominal, stress and mismatch datasets, and generate.py
 docs/                      problem statement and model description
 ```
 
@@ -46,8 +47,10 @@ pip install -r requirements.txt
 ## Generate data, run, test
 
 ```bash
-python db/generate.py            # write db/biofouling_synthetic_dataset.csv (seed 42, 8,760 h)
-python main.py                   # simulate, train baselines, optimise, report
+python db/generate.py            # regenerate all datasets in db/
+python -m ml.train --float64     # train ODE + UDE ensemble (~4 min, CPU)
+python -m ml.evaluate            # metrics -> ml/artifacts/metrics.json
+python -m web.server             # dashboard at http://127.0.0.1:8050/
 python -m pytest tests -q        # unit tests
 ```
 

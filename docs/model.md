@@ -1,12 +1,13 @@
 # Model Description
 
-This document describes the proposed modelling pipeline and how far it has been built.
+This document describes the modelling pipeline and how far it has been built.
 
 > **Status labels.** **[EXISTS]** means the code is in this repository today.
-> **[PROPOSED]** means it is designed here but not yet implemented. Everything about the
-> Universal Differential Equation (UDE) and its training is **[PROPOSED]**. The decision layer
-> exists as a deterministic re-simulation sweep; its UDE-driven, chance-constrained form is
-> **[PROPOSED]**. Section 9 has the full status table.
+> **[PROPOSED]** means it is designed here but not yet implemented. The UDE, its training and
+> evaluation exist in `ml/` (see [ml/README.md](../ml/README.md) for full results). The decision
+> layer exists as a deterministic re-simulation sweep; the UDE first-cycle risk is computed
+> (`ml/forecast.risk_by_interval`) and used by the dashboard, but is not wired into
+> `cleaning_optimizer.py`. Section 9 has the full status table.
 
 All data is synthetic. See [problem_statement.md](problem_statement.md) for scope and limitations.
 
@@ -86,15 +87,22 @@ or above `T_max`.
 For scale, at nominal flow a clean tube has v ≈ 1.41 m/s and tau_w ≈ 5.9 Pa. At the thermal
 limit (180 µm), dP ≈ 13.2 kPa and tau_w ≈ 10.3 Pa.
 
-## 3. The Universal Differential Equation **[PROPOSED]**
+## 3. The Universal Differential Equation **[EXISTS]** in `ml/ude.py`
 
 ### Equation
 
 ```
 d(delta)/dt = K_dep * r(T) * g_theta(T, v, season, delta/delta_max, hours_since_cleaning)
+                    * phi_lag(cum_clean_hours) * (1 - delta/delta_max)
               -  K_rem * tau_w(v) * delta
-              \_________ deposition ____________/      \___ shear removal ___/
 ```
+
+As implemented, the step mirrors `synthetic_generator.step()` exactly, including its lag phase
+`phi_lag` (driven by `cum_clean_hours`, replayed from the maintenance log with the generator's
+`max(24, 0.2 * cum)` memory rule) and carrying capacity. The one nominal-data term the physics
+omits is the generator's seasonal nutrient factor `1 + 0.3 sin(phase)`; that is what `g_theta`
+has to learn. With `g` set to that factor, true inputs and true `delta0`, the module reproduces
+the generator's trajectory to `rtol 1e-9` (`tests/test_ml_ude.py`).
 
 - `r(T)`: the existing Ratkowsky factor, a fixed physics prior.
 - `g_theta`: a small neural network that **multiplies** the deposition term to correct what the
@@ -111,13 +119,13 @@ Five physical inputs, presented to the network as six numbers (season is encoded
 | Tube velocity `v` (m/s) | `v / v_nom`, with `v_nom` = 1.414 m/s (clean tube at `COOLING_WATER_MASS_FLOW_KG_S`) | about 0.96 to 1.07 |
 | Season, hour of year `t` | `sin(2*pi*t/8760)`, `cos(2*pi*t/8760)` | -1 to 1 |
 | Relative thickness | `delta / BIOFILM_MAX_THICKNESS_M` (350e-6 m) | 0 to 1 |
-| Hours since cleaning `h_c` | `min(h_c / 720, 3.0)` (clip at 3 so the 90-day sweep range stays distinct) | 0 to 3 |
+| Hours since cleaning `h_c` | `h_c / 720`, clipped to [0, 1] | 0 to 1 |
 
 ```
 inputs : 6 numbers (table above)
 hidden : 2 layers x 16 units, tanh
 output : linear layer, weights and bias initialised to zero
-         g_theta(.) = 1 + NN(.)   ->   g = 1 exactly at initialisation
+         g_theta(.) = exp(NN(.))   ->   g = 1 exactly at initialisation, and g > 0 always
 ```
 
 About 400 parameters in total.
@@ -131,8 +139,8 @@ About 400 parameters in total.
   `g_theta` cannot represent either effect.
 - **Physics stays the default.** Because the last layer starts at zero, **the untrained UDE equals
   the pure physics ODE**, and the L2 penalty `lambda * mean((g_theta - 1)^2)` (Section 5) keeps `g`
-  near 1 unless the data needs otherwise. To keep deposition non-negative, the output is clamped
-  at `g >= 0`.
+  near 1 unless the data needs otherwise (as implemented: `0.01 * mean((log g)^2)`). The
+  exponential keeps deposition non-negative without clamping.
 - **Overfitting risk.** More inputs mean more ways to fit noise, and a year contains only about 12
   cleaning cycles. Keep the network this small, and use the stress and mismatch datasets
   (Section 8) for validation, not only a slice of the nominal year.
@@ -155,7 +163,7 @@ initial values: config.K_DEPOSITION, config.K_REMOVAL
   `delta <- (1 - efficiency) * delta`, with efficiency 0.90 (mechanical) or 0.95 (chemical) from
   `config.py`.
 
-## 4. Observation model **[PROPOSED]**
+## 4. Observation model **[EXISTS]** in `ml/physics_torch.py`
 
 A differentiable PyTorch port of the existing `fouling_indicators.py` functions:
 
@@ -170,7 +178,8 @@ delta  ->  D_eff, v, Re, f         ->  dP_hat = Darcy-Weisbach (Section 2)
 L_obs = mean[ ((U_hat - U_meas) / sigma_U)^2 ] + mean[ ((dP_hat - dP_meas) / sigma_dP)^2 ]
 ```
 
-- `sigma_U ≈ 25 W/m²K` and `sigma_dP ≈ 1.5% of dP`, matching the noise the generator adds.
+- As implemented: Huber loss (delta = 1) on residuals standardised by `sigma_U` = 25 W/m²K and
+  `sigma_dP` = 0.20 kPa (1.5% sensor noise plus about 2% from using the measured, 1%-noisy flow).
 - Weighting each term by its sensor-noise scale stops either signal from dominating because of
   its units.
 
@@ -178,26 +187,29 @@ This removes the target-leakage shortcut (problem_statement.md, Section 6). The 
 shown `Rf`, so it has to explain the measurements through the state `delta`. The test target `Rf`
 is used for evaluation only.
 
-The torch port will be checked against the existing numpy functions to within floating-point
-tolerance before it is used.
+The torch port matches the numpy functions to within 1e-5 relative error and passes
+`torch.autograd.gradcheck` (`tests/test_ml_physics.py`).
 
-## 5. Training **[PROPOSED]**
+## 5. Training **[EXISTS]** in `ml/train.py`
 
 | Item | Choice | Reason |
 |---|---|---|
-| Scheme | Multiple shooting over 7–30 day windows, each starting right after a cleaning | Short windows stop errors compounding over a year; starting after a cleaning gives a well-known initial state |
-| Initial state per window | `(1 - efficiency) * delta_before` from the previous window, or a learned per-window value | Handles the cleaning reset |
+| Scheme | Multiple shooting over 14-day windows (configurable 7–30), starting after each cleaning and every 24 h within cycles | Short windows stop errors compounding over a year |
+| Initial state per window | Truth-free: median of the U- and dP-based inversions over a 12 h burn-in; loss only after the burn-in | No true `delta` is ever used |
+| Stages | 1: ODE (g = 1), fit `K_dep`, `K_rem`; 2: UDE from the ODE fit, net LR 3e-3, K LR 3e-3, gradient clipping, early stopping on validation | Hyperparameters chosen on nominal validation only |
 | Optimiser | Adam | Standard for small neural ODEs |
 | Regularisation | weight decay on `theta`, plus `lambda * mean((g_theta - 1)^2)` | Keeps the correction small unless the data needs it |
-| Split | Chronological train / validation / test, no shuffling | No future information in training |
+| Split | Nominal year by whole cleaning cycles: train 0–7 (h 0–5758), validation 8–9 (h 5759–7198), test 10–12 (h 7199–8759) | No cycle straddles splits |
 | Uncertainty | Ensemble of 5 seeds | Spread of the forecasts is used by the decision layer |
-| Device | CPU is enough (one state, about 400 network parameters); Apple MPS optional | |
+| Device | CPU float64: 101 ms per training step vs 314 ms on MPS (M4 Pro), measured by `ml/bench_device.py` | Tiny model: MPS launch overhead dominates |
 
 ## 6. Decision layer
 
 **[EXISTS]** in `cleaning_optimizer.py`: the shared cost function, forward re-simulation of any
 cleaning policy, and the exact 1..90-day sweep, all using the generator's physics.
-**[PROPOSED]**: replacing that physics with the UDE forecast ensemble, and the chance constraint.
+**[EXISTS]** outside the optimiser: the UDE first-cycle risk `P(limit crossed before T)`
+(`ml/forecast.risk_by_interval`), applied with epsilon by the dashboard's `/api/decision`.
+**[PROPOSED]**: putting the chance constraint and the UDE forecast inside `cleaning_optimizer.py`.
 
 ### Cost per day for cleaning interval T (days)
 
@@ -264,11 +276,11 @@ specifications.
 
 | Baseline | Status | Notes |
 |---|---|---|
-| Persistence (`Rf(t+h) = Rf(t)`) | [PROPOSED] | Simplest reference; any useful model must beat it |
-| Ridge regression (`baseline_model.py`) | [EXISTS] | Must be re-run on the leak-free target |
-| Ridge + gradient boosting (`improved_model.py`) | [EXISTS] | Same |
-| Plain fitted ODE (UDE with `g_theta` removed, only `K_dep`, `K_rem` fitted) | [PROPOSED] | Shows what the neural correction adds |
-| Physics-guided LSTM | [PROPOSED, optional] | Only if time allows |
+| Persistence (Rf from the last 24 h of U) | [EXISTS] `ml/baselines.py` | Leak-free |
+| Ridge, one per horizon, 24 h history features | [EXISTS] `ml/baselines.py` | Leak-free replacement for `baseline_model.py` |
+| Gradient boosting, one per horizon | [EXISTS] `ml/baselines.py` | Leak-free replacement for `improved_model.py` |
+| Plain fitted ODE (g = 1, `K_dep`, `K_rem` fitted) | [EXISTS] `ml/train.py` stage 1 | Shows what the neural correction adds |
+| Physics-guided LSTM | [PROPOSED, optional] | Not built |
 | Fixed 30-day schedule | [EXISTS] | Re-simulated, shared cost function |
 | Best fixed interval (1..90 d sweep) | [EXISTS] | Stronger schedule baseline than fixed 30 d |
 | Condition-based (clean at a fraction of the Rf/dP limits) | [EXISTS] | Idealised: triggers on the true simulated state |
@@ -285,13 +297,33 @@ specifications.
 | `stress_long_interval.csv` (seed 44, 90-day cleaning) | constraint logic at long intervals | Rf, BSI |
 | `mismatch_stress.csv` (seed 45, 60-day cleaning) | **held-out test only**: drift, scale term and bloom that the UDE structure lacks | Rf, dP, BSI |
 
-### Forecast evaluation **[PROPOSED]**
+### Forecast evaluation **[EXISTS]** in `ml/evaluate.py`
 
 - **Leak-free target:** predict `Rf(t + h)` using only data up to time `t`. Inputs must not
   include `U` or `dP` measured after `t`, and same-time `U` must not be used as a regressor.
   The existing Ridge and Ridge+GBM baselines must be re-run on this target.
 - **Horizons:** h = 1 h, 24 h, 72 h, 168 h.
-- **Metrics:** MAE, RMSE, R² per horizon, and skill relative to persistence.
+- **Metrics:** MAE, RMSE, R² per horizon on Rf (vs truth) and on U, dP (vs measured); 90% band
+  coverage; time-to-limit error against a 7-day linear trend.
+
+**Results** (Rf RMSE, 1e-5 m²K/W, climatology inputs; full tables in `ml/README.md`):
+
+| Dataset | Persistence 1 h / 168 h | ODE 1 h / 168 h | UDE 1 h / 168 h | UDE 90% coverage at 168 h |
+|---|---|---|---|---|
+| nominal test | **0.13** / 1.64 | 0.20 / 0.34 | 0.20 / **0.16** | 0.98 |
+| stress_no_clean | **0.39** / 1.45 | 0.52 / 0.51 | 0.52 / **0.47** | 0.97 |
+| stress_long_interval | **0.31** / 7.17 | 0.41 / 0.42 | 0.41 / **0.31** | 0.98 |
+| mismatch_stress (held-out) | **0.38** / 8.99 | 0.43 / 2.28 | 0.43 / **2.21** | 0.64 |
+
+Verdict:
+- **Long horizons:** at 72–168 h the UDE has the lowest Rf error on every dataset. It is about 2x
+  better than the ODE on nominal test, but only marginally better on the held-out mismatch set.
+- **1 h:** persistence wins everywhere.
+- **Calibration:** the UDE's bands are well calibrated on matched data and under-cover on mismatch.
+- **Ridge and GBM:** they fail outside the nominal Rf range.
+- **Time to limit:** fair for Rf; poor for dP with every method.
+- **What `g` learned:** a seasonal multiplier (0.72 to 1.16) closely tracking the generator's
+  nutrient factor.
 
 ### Mismatched test set **[EXISTS]**
 
@@ -339,11 +371,12 @@ The thermal penalty dominates the cost, so the optimum cleans about twice as oft
 | Strategy comparison | `CleaningScheduleOptimizer.compare_strategies` | EXISTS | See Section 8 |
 | Interval optimiser (exact 1..90 d sweep) | `CleaningIntervalOptimizer.optimize_interval` | EXISTS | Deterministic, uses generator physics; **does not use any ML forecast** yet |
 | Sustainability accounting | `sustainability_metrics.py` | EXISTS | |
-| Torch observation model | — | PROPOSED | |
-| UDE (`g_theta`, learnable `K_dep`, `K_rem`) | — | PROPOSED | |
-| Multiple-shooting training, 5-seed ensemble | — | PROPOSED | |
-| Leak-free multi-horizon evaluation | — | PROPOSED | |
-| Chance constraint and UDE forecast in the interval search | — | PROPOSED | TODO marked in `CleaningIntervalOptimizer` |
+| Torch physics and observation model | `ml/physics_torch.py` | EXISTS | numpy parity < 1e-5, gradcheck |
+| UDE (`g_theta`, learnable `K_dep`, `K_rem`) | `ml/ude.py` | EXISTS | Reproduces the generator exactly with g = nutrient factor |
+| Multiple-shooting training, 5-seed ensemble | `ml/train.py`, `ml/artifacts/` | EXISTS | Fitted K_dep 1.76–1.83e-7, K_rem 3.5–3.7e-7 (config 1.6e-7, 4.2e-6) |
+| Leak-free baselines and multi-horizon evaluation | `ml/baselines.py`, `ml/evaluate.py` | EXISTS | `ml/artifacts/metrics.json` |
+| Forecast API, first-cycle risk, g slices | `ml/forecast.py` | EXISTS | Used by the dashboard (`web/`) |
+| Chance constraint inside `cleaning_optimizer.py` | — | PROPOSED | TODO marked in `CleaningIntervalOptimizer`; the dashboard combines both |
 
 **About the existing ML models.** They use same-time `U_overall_meas` as an input to predict
 same-time `Rf_fouling_resistance`. Because `Rf = 1/U - 1/U_clean`, their R² of about 0.91–0.93
@@ -381,7 +414,12 @@ docs/                      this document and the problem statement
   measurements, so it is an upper bound on what a real condition-based rule could achieve.
 - **Lumped 1-D model:** uniform film thickness, constant `k_biofilm`, a single representative
   tube.
-- **Coarse uncertainty:** a 5-member ensemble cannot estimate small exceedance probabilities.
+- **Coarse uncertainty:** 5 members x 3 initial states (15 trajectories) cannot estimate small
+  exceedance probabilities, and the bands miss mechanisms the model lacks (mismatch coverage 0.64
+  at 168 h).
+- **`K_rem` is practically unidentifiable from nominal data.** Both models fit it about 12x
+  below config: with cleaning every 30 days, removal is about 2% of deposition. This mainly
+  degrades forecasts near the carrying capacity, such as time to the dP limit.
 - **Illustrative costs:** values in `config.py` are not plant data.
 
 ### Known issues resolved in this iteration
