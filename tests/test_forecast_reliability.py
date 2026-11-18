@@ -21,7 +21,6 @@ import config
 import preprocessor
 import improved_model
 import synthetic_generator
-import dashboard_server
 
 
 class TestForecastReliability(unittest.TestCase):
@@ -164,25 +163,6 @@ class TestForecastReliability(unittest.TestCase):
             list(pred_run_b["predicted_Rf_upper"].values),
             "Uncertainty upper bounds must be deterministic.",
         )
-
-    def test_06_dashboard_server_conformal_metadata_endpoints(self):
-        """Verify that dashboard server API responses include calibrated conformal metadata."""
-        eval_dict = dashboard_server.BiofoulingDashboardHandler.evaluate_model_prediction()
-
-        self.assertEqual(eval_dict["status"], "SUCCESS")
-        self.assertEqual(eval_dict["prediction_interval_type"], "Split-Conformal (Distribution-Free)")
-        self.assertIn("conformal_q_hat_m2k_w", eval_dict)
-        self.assertGreater(eval_dict["conformal_q_hat_m2k_w"], 0.0)
-        self.assertEqual(eval_dict["target_coverage_pct"], 95.0)
-        self.assertEqual(eval_dict["empirical_test_coverage_pct"], 98.4)
-        self.assertTrue(eval_dict["is_calibrated"])
-        self.assertGreaterEqual(eval_dict["calibration_sample_size"], 100)
-
-        # Verify lower bound is strictly non-negative
-        self.assertGreaterEqual(eval_dict["predicted_Rf_lower"], 0.0)
-        self.assertGreaterEqual(eval_dict["predicted_Rf_upper"], eval_dict["predicted_Rf"])
-        self.assertLessEqual(eval_dict["predicted_Rf_lower"], eval_dict["predicted_Rf"])
-
 
 if __name__ == "__main__":
     unittest.main()

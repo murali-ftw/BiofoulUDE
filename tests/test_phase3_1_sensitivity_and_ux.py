@@ -28,7 +28,6 @@ sys.path.insert(0, str(APP_DIR))
 
 import config
 import fouling_indicators
-import data_ingestion
 import cleaning_optimizer
 
 
@@ -62,37 +61,6 @@ class TestPhase31SensitivityAndUX(unittest.TestCase):
             reconstructed_dp_pa, _, _ = fouling_indicators.compute_hydraulic_pressure_drop(m_dot, biofilm_thickness_m=t)
             self.assertAlmostEqual(reconstructed_dp_pa / 1000.0, dp, delta=0.01)
             prev_t = t
-
-    def test_02_manual_snapshot_hydraulic_derivation_when_u_omitted(self):
-        """Verify manual snapshot derives physical Rf and degraded U when U is omitted."""
-        # 1. Clean input
-        inp_clean = {
-            "T_cool_in_meas": 18.5,
-            "T_cool_out_meas": 26.2,
-            "mass_flow_cool_meas": 220.0,
-            "delta_P_meas_kPa": 7.91,
-            "time_hours": 100.0,
-        }
-        res_clean = data_ingestion.validate_manual_snapshot(inp_clean)
-        self.assertTrue(res_clean["is_valid"])
-        self.assertEqual(res_clean["derived_indicators"]["Rf_fouling_resistance"], 0.0)
-        self.assertEqual(res_clean["derived_indicators"]["biofilm_thickness_um"], 0.0)
-        self.assertEqual(res_clean["derived_indicators"]["U_overall_meas"], config.U_CLEAN_DESIGN_W_M2K)
-
-        # 2. Moderately fouled input without U
-        inp_fouled = {
-            "T_cool_in_meas": 18.5,
-            "T_cool_out_meas": 26.2,
-            "mass_flow_cool_meas": 220.0,
-            "delta_P_meas_kPa": 14.5,
-            "time_hours": 1500.0,
-        }
-        res_fouled = data_ingestion.validate_manual_snapshot(inp_fouled)
-        self.assertTrue(res_fouled["is_valid"])
-        self.assertGreater(res_fouled["derived_indicators"]["biofilm_thickness_um"], 40.0)
-        self.assertGreater(res_fouled["derived_indicators"]["Rf_fouling_resistance"], 5.0e-5)
-        self.assertLess(res_fouled["derived_indicators"]["U_overall_meas"], config.U_CLEAN_DESIGN_W_M2K)
-        self.assertEqual(res_fouled["provenance"]["U_overall_meas"], "derived_calculation")
 
     def test_03_optimizer_granularity_beyond_binary_clustering(self):
         """Verify optimizer outputs diverse recommendations (0, 7, 14, 21, 30, 60 days) across scenarios."""
@@ -128,33 +96,6 @@ class TestPhase31SensitivityAndUX(unittest.TestCase):
         self.assertIn(14, recommendations_observed)
         self.assertIn(21, recommendations_observed)
         self.assertTrue(30 in recommendations_observed or 60 in recommendations_observed)
-
-    def test_04_csv_upload_ux_metadata_completeness(self):
-        """Verify CSV preview and quality reporting provide all required metadata for UX stepper and summary card."""
-        csv_sample = (
-            "timestamp,T_cool_in_meas,T_cool_out_meas,mass_flow_cool_meas,delta_P_meas_kPa,heat_duty_MW\n"
-            "2026-06-01T00:00:00,18.5,26.2,220.0,8.2,7.09\n"
-            "2026-06-01T01:00:00,18.6,26.3,220.0,8.3,7.09\n"
-            "2026-06-01T02:00:00,18.5,26.1,220.0,8.2,7.09\n"
-        )
-        ingestor = data_ingestion.CSVDataIngestor()
-        preview = ingestor.generate_preview(csv_sample)
-
-        self.assertTrue(preview["success"])
-        self.assertEqual(preview["total_estimated_rows"], 3)
-        self.assertEqual(len(preview["headers"]), 6)
-        self.assertEqual(preview["delimiter"], ",")
-
-        res = ingestor.ingest_and_validate(csv_sample, preview["inferred_mapping"], dataset_name="unit_test_csv")
-        self.assertTrue(res["success"])
-        df = res["dataframe"]
-        qr = res["quality_report"]
-        self.assertEqual(qr["total_rows"], 3)
-        self.assertEqual(qr["valid_rows"], 3)
-        self.assertGreaterEqual(qr["quality_score"], 90.0)
-        self.assertEqual(qr["quality_rating"], "EXCELLENT")
-        self.assertEqual(qr["validity_pct"], 100.0)
-
 
 if __name__ == "__main__":
     unittest.main()

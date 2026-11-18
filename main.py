@@ -26,7 +26,6 @@ import baseline_model
 import improved_model
 import cleaning_optimizer
 import sustainability_metrics
-import dashboard_server
 
 
 def run_full_pipeline(seed: int = config.DEFAULT_RANDOM_SEED, hours: int = 8760, save_csv: bool = True) -> dict:
@@ -154,18 +153,10 @@ def main():
     parser.add_argument("--run-simulation", action="store_true", help="Generate 8,760h synthetic biofouling dataset")
     parser.add_argument("--train-models", action="store_true", help="Train baseline and ML forecasting models")
     parser.add_argument("--optimize-cleaning", action="store_true", help="Evaluate cleaning schedule optimization")
-    parser.add_argument("--start-dashboard", action="store_true", help="Start local interactive browser dashboard")
     parser.add_argument("--report", action="store_true", help="Print summary performance report")
     parser.add_argument("--seed", type=int, default=config.DEFAULT_RANDOM_SEED, help="Random seed for reproducibility")
     parser.add_argument("--hours", type=int, default=config.DATASET_DEFAULT_HOURS, help="Simulation duration in hours")
-    parser.add_argument("--port", type=int, default=config.DEFAULT_PORT, help="Port for dashboard server")
-    parser.add_argument("--host", type=str, default=config.DEFAULT_HOST, help="Host address for dashboard server")
     args = parser.parse_args()
-
-    # If start-dashboard requested
-    if args.start_dashboard:
-        dashboard_server.start_server(host=args.host, port=args.port)
-        return
 
     # Default action if no specific flag or if pipeline flags passed
     run_full_pipeline(seed=args.seed, hours=args.hours)

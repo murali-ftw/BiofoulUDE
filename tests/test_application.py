@@ -34,7 +34,6 @@ import baseline_model
 import improved_model
 import cleaning_optimizer
 import sustainability_metrics
-import dashboard_server
 
 
 class TestRepairedBiofoulingApplication(unittest.TestCase):
@@ -156,38 +155,6 @@ class TestRepairedBiofoulingApplication(unittest.TestCase):
         biocide = sustainability_metrics.track_biocide_discharge(5, 12.0, 100.0)
         self.assertEqual(biocide["total_biocide_kg"], 60.0)
         self.assertTrue(biocide["within_permit_limit"])
-
-    def test_11_dashboard_server_endpoints(self):
-        """Test local HTTP server status and KPI endpoints."""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-
-        server = http.server.HTTPServer(("127.0.0.1", port), dashboard_server.BiofoulingDashboardHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        time.sleep(0.3)
-
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as resp:
-                self.assertEqual(resp.status, 200)
-                html = resp.read().decode("utf-8")
-                self.assertIn("<svg", html.lower())
-
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=3) as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertEqual(data.get("status"), "ONLINE")
-
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/kpis", timeout=3) as resp:
-                self.assertEqual(resp.status, 200)
-                kpis = json.loads(resp.read().decode("utf-8"))
-                self.assertIn("Rf_fouling_resistance", kpis)
-        finally:
-            server.shutdown()
-            server.server_close()
-
 
 if __name__ == "__main__":
     unittest.main()

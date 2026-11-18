@@ -55,6 +55,5 @@ scratch/
 # Antigravity agent discovery folder (local only)
 .agents/
 
-# User uploads - preserve directory with .gitkeep
-data/user_uploads/*
-!data/user_uploads/.gitkeep
+# Model checkpoints (regenerable)
+*.pkl

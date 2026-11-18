@@ -37,7 +37,6 @@ import fouling_indicators
 import synthetic_generator
 import cleaning_optimizer
 import improved_model
-import dashboard_server
 
 
 class TestCleaningIntervalOptimizer(unittest.TestCase):
@@ -167,52 +166,6 @@ class TestCleaningIntervalOptimizer(unittest.TestCase):
         self.assertTrue(np.all(lower <= preds))
         self.assertTrue(np.all(preds <= upper))
         self.assertTrue(np.all(lower >= 0.0))
-
-    def test_09_dashboard_api_endpoints(self):
-        """Verify local HTTP server returns valid JSON for upgraded recommendation and forecast endpoints."""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("", 0))
-        port = sock.getsockname()[1]
-        sock.close()
-
-        server = http.server.HTTPServer(("127.0.0.1", port), dashboard_server.BiofoulingDashboardHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        time.sleep(0.5)
-
-        try:
-            # 1. Test GET /api/recommendation
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/recommendation", timeout=5) as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertIn("recommended_interval_days", data)
-                self.assertIn("all_scenarios", data)
-                self.assertIn("primary_reason", data)
-
-            # 2. Test GET /api/forecast
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/forecast?horizon_hours=168", timeout=5) as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertIn("historical", data)
-                self.assertIn("forecast", data)
-                self.assertIn("thresholds", data)
-
-            # 3. Test POST /api/optimize
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/api/optimize",
-                data=json.dumps({"cleaning_cost": 4000.0, "horizon_days": 60}).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                self.assertEqual(resp.status, 200)
-                data = json.loads(resp.read().decode("utf-8"))
-                self.assertIn("annual_savings_usd", data)
-                self.assertIn("interval_recommendation", data)
-        finally:
-            server.shutdown()
-            server.server_close()
-
 
 if __name__ == "__main__":
     unittest.main()
