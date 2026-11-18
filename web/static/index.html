@@ -1,3 +1,186 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Biofouling UDE Demo</title></head>
-<body><p>SYNTHETIC DATA - academic demonstration, not for plant use. UI follows; API under /api/.</p></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Biofouling UDE Demo</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/hammer.min.js"></script>
+  <script src="vendor/chartjs-plugin-zoom.min.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="banner" role="note" aria-label="Data provenance">
+      <strong>SYNTHETIC DATA</strong> · academic demonstration · <strong>not for plant use</strong>
+      <span id="mode-badge" class="badge badge-mode" hidden></span>
+    </div>
+    <div class="title-row">
+      <h1>Heat-exchanger biofouling: UDE forecast &amp; cleaning interval</h1>
+      <p id="disclaimer" class="disclaimer"></p>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-monitor" aria-controls="panel-monitor" aria-selected="true">Monitor</button>
+      <button role="tab" id="tab-forecast" aria-controls="panel-forecast" aria-selected="false" tabindex="-1">Forecast</button>
+      <button role="tab" id="tab-decision" aria-controls="panel-decision" aria-selected="false" tabindex="-1">Decision</button>
+      <button role="tab" id="tab-models" aria-controls="panel-models" aria-selected="false" tabindex="-1">Models</button>
+      <button role="tab" id="tab-correction" aria-controls="panel-correction" aria-selected="false" tabindex="-1">Correction</button>
+      <button role="tab" id="tab-about" aria-controls="panel-about" aria-selected="false" tabindex="-1">About</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- shared dataset / origin controls -->
+    <section class="controls shared" aria-label="Dataset and origin">
+      <label>Dataset
+        <select id="dataset"></select>
+      </label>
+      <p id="dataset-desc" class="hint"></p>
+      <label class="grow">Origin hour <output id="origin-out" for="origin"></output>
+        <input type="range" id="origin" min="11" max="8759" step="1" value="3000">
+      </label>
+      <label>Origin (h)
+        <input type="number" id="origin-num" min="11" max="8759" step="1" value="3000">
+      </label>
+    </section>
+
+    <!-- 1 Monitor -->
+    <section role="tabpanel" id="panel-monitor" aria-labelledby="tab-monitor">
+      <div class="panel-head">
+        <h2>Monitor</h2>
+        <p class="hint">Scroll to zoom, drag to pan (time axis is shared). The vertical line marks the origin. Cleanings are marked
+          <span class="key">M</span> mechanical and <span class="key">C</span> chemical.</p>
+        <button id="reset-zoom" type="button">Reset zoom</button>
+      </div>
+      <div class="chart-grid" id="monitor-charts"></div>
+    </section>
+
+    <!-- 2 Forecast -->
+    <section role="tabpanel" id="panel-forecast" aria-labelledby="tab-forecast" hidden>
+      <div class="panel-head"><h2>Forecast</h2></div>
+      <form class="controls" id="forecast-form" onsubmit="return false">
+        <label>Horizon <output id="horizon-out" for="horizon"></output>
+          <input type="range" id="horizon" min="24" max="720" step="24" value="168">
+        </label>
+        <label>Model
+          <select id="model">
+            <option value="ude">UDE ensemble</option>
+            <option value="ode">Plain ODE</option>
+            <option value="persistence">Persistence</option>
+          </select>
+        </label>
+        <label>Future inputs
+          <select id="exog">
+            <option value="climatology">Climatology (seasonal T, nominal flow)</option>
+            <option value="oracle">Oracle (measured future T, flow)</option>
+          </select>
+        </label>
+        <label>Temperature offset <output id="toff-out" for="toff"></output>
+          <input type="range" id="toff" min="-5" max="5" step="0.5" value="0">
+        </label>
+        <fieldset class="cleanings">
+          <legend>Planned cleanings in the horizon</legend>
+          <div class="row">
+            <label>Hour <input type="number" id="clean-hour" step="1"></label>
+            <label>Type
+              <select id="clean-type"><option value="mechanical">mechanical</option><option value="chemical">chemical</option></select>
+            </label>
+            <button type="button" id="clean-add">Add</button>
+            <button type="button" id="clean-dataset">Use dataset's schedule</button>
+            <button type="button" id="clean-clear">Clear</button>
+          </div>
+          <ul id="clean-list" aria-live="polite"></ul>
+        </fieldset>
+        <button type="button" id="run-forecast" class="primary">Run forecast</button>
+      </form>
+      <div id="ttl-readout" class="readout" aria-live="polite"></div>
+      <div id="forecast-notes" class="notes"></div>
+      <div class="chart-grid" id="forecast-charts"></div>
+    </section>
+
+    <!-- 3 Decision -->
+    <section role="tabpanel" id="panel-decision" aria-labelledby="tab-decision" hidden>
+      <div class="panel-head">
+        <h2>Decision</h2>
+        <p class="advisory" role="note"><strong>Advisory only:</strong> operator review and plant procedures remain mandatory.</p>
+      </div>
+      <form class="controls" onsubmit="return false">
+        <label>Risk tolerance ε <output id="eps-out" for="eps"></output>
+          <input type="range" id="eps" min="0" max="0.5" step="0.01" value="0.05">
+        </label>
+        <label>Shortest interval (d) <input type="number" id="tmin" min="1" max="90" value="1"></label>
+        <label>Longest interval (d) <input type="number" id="tmax" min="1" max="90" value="90"></label>
+        <button type="button" id="run-decision" class="primary">Evaluate intervals</button>
+      </form>
+      <div id="decision-summary" class="readout" aria-live="polite"></div>
+      <div class="chart-card wide" id="decision-chart-card"></div>
+      <div id="decision-compare"></div>
+      <div id="decision-notes" class="notes"></div>
+    </section>
+
+    <!-- 4 Models -->
+    <section role="tabpanel" id="panel-models" aria-labelledby="tab-models" hidden>
+      <div class="panel-head"><h2>Models</h2></div>
+      <div id="verdict" class="verdict"></div>
+      <div class="controls">
+        <label>Quantity
+          <select id="metric-q"><option value="rf">Rf (vs truth)</option><option value="u">U (vs measured)</option><option value="dp">dP (vs measured)</option></select>
+        </label>
+        <label>Metric
+          <select id="metric-m"><option value="rmse">RMSE</option><option value="mae">MAE</option><option value="r2">R²</option></select>
+        </label>
+      </div>
+      <div class="chart-grid" id="models-charts"></div>
+      <div id="metrics-tables"></div>
+    </section>
+
+    <!-- 5 Correction -->
+    <section role="tabpanel" id="panel-correction" aria-labelledby="tab-correction" hidden>
+      <div class="panel-head">
+        <h2>Learned correction g</h2>
+        <p class="hint">g multiplies the physics deposition rate: g = 1 means the plain physics is kept; g &gt; 1 means the network
+          adds growth, g &lt; 1 removes it. Each panel varies one input with the others held at a reference state.</p>
+      </div>
+      <div id="correction-note" class="readout"></div>
+      <div class="chart-grid" id="correction-charts"></div>
+    </section>
+
+    <!-- 6 About -->
+    <section role="tabpanel" id="panel-about" aria-labelledby="tab-about" hidden>
+      <div class="panel-head"><h2>About</h2></div>
+      <div class="prose">
+        <h3>Problem</h3>
+        <p>Biofilm growing inside cooling-water tubes adds thermal resistance (1/U = 1/U<sub>clean</sub> + R<sub>f</sub>, R<sub>f</sub> = δ/k)
+          and raises the pressure drop and pumping energy. The question is <em>when to clean</em>: cleaning costs money, downtime and
+          (for chemical cleaning) biocide against a permit, while fouling costs heat-duty margin and pumping power, and must stay
+          below thermal and hydraulic limits.</p>
+        <h3>Model</h3>
+        <p>A Universal Differential Equation: the generator's known physics (Ratkowsky temperature factor, lag phase, carrying capacity,
+          shear removal, Darcy-Weisbach/Haaland hydraulics) with a small neural network g that multiplies the deposition rate.
+          It is trained only on <em>measured</em> U and dP, never on R<sub>f</sub>, from a nominal synthetic year; an ensemble of five
+          seeds gives the uncertainty band. The decision tab re-simulates each candidate cleaning interval and adds the ensemble's
+          probability of crossing a limit before the first cleaning.</p>
+        <h3>Limitations</h3>
+        <ul>
+          <li>All data is synthetic, from the project's own generator. There is no real plant data and no plant validation.</li>
+          <li>The UDE shares most of its structure with the generator, so the nominal test is easy; the mismatch dataset is the honest test.</li>
+          <li>The decision layer's first-cycle risk rule is a prototype: five members cannot resolve small probabilities, and costs come
+            from the generator, not from the UDE.</li>
+          <li>Cost constants are illustrative, not plant data.</li>
+        </ul>
+        <h3>References</h3>
+        <ul>
+          <li>Rao et al. (2009), <cite>Biofouling</cite> 25(7), 581-591, doi:10.1080/08927010903016543. Fouling of a heat exchanger at a
+            nuclear test reactor, Kalpakkam (one facility; not generalised).</li>
+          <li>Chen et al. (2024), <cite>Energy</cite> 294, 130814. PSO-LSTM for condenser fouling, cited as precedent only; its reported
+            gains are the authors', not this project's.</li>
+        </ul>
+        <p class="disclaimer">Academic demonstration, not for plant use.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" role="status" aria-live="assertive"></div>
+  <script src="app.js"></script>
+</body>
+</html>
